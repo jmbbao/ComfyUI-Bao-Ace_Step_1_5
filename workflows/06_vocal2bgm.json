@@ -1,0 +1,467 @@
+{
+  "last_node_id": 8,
+  "last_link_id": 8,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadAudio",
+      "pos": [
+        40,
+        80
+      ],
+      "size": [
+        300,
+        120
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio"
+      },
+      "widgets_values": [
+        "dry_vocals.wav",
+        "audio"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "AceStepVAELoader",
+      "pos": [
+        40,
+        260
+      ],
+      "size": [
+        300,
+        160
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "vae_model",
+          "type": "ACESTEP_VAE",
+          "links": [
+            1,
+            6
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AceStepVAELoader"
+      },
+      "widgets_values": [
+        "vae",
+        "cuda",
+        "fp16",
+        true
+      ]
+    },
+    {
+      "id": 3,
+      "type": "AceStepVAEEncode",
+      "pos": [
+        400,
+        80
+      ],
+      "size": [
+        320,
+        290
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae_model",
+          "type": "ACESTEP_VAE",
+          "link": 1
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio_latent",
+          "type": "ACESTEP_AUDIO_LATENT",
+          "links": [
+            3
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "duration_sec",
+          "type": "FLOAT",
+          "links": [],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AceStepVAEEncode"
+      },
+      "widgets_values": [
+        true,
+        15.0,
+        2.0,
+        true,
+        true,
+        true,
+        0.0,
+        -1.0
+      ]
+    },
+    {
+      "id": 4,
+      "type": "AceStepVocal2BGMTask",
+      "pos": [
+        780,
+        80
+      ],
+      "size": [
+        320,
+        340
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vocal_audio_latent",
+          "type": "ACESTEP_AUDIO_LATENT",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "task_config",
+          "type": "ACESTEP_TASK_CONFIG",
+          "links": [
+            5
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AceStepVocal2BGMTask"
+      },
+      "widgets_values": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 5,
+      "type": "AceStepDiTLoader",
+      "pos": [
+        400,
+        440
+      ],
+      "size": [
+        340,
+        280
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "dit_model",
+          "type": "ACESTEP_DIT",
+          "links": [
+            4
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AceStepDiTLoader"
+      },
+      "widgets_values": [
+        "acestep-v15-xl-base",
+        "int8_dynamic",
+        false,
+        "_int8_convrot",
+        true,
+        1.5,
+        true,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 6,
+      "type": "AceStepSampler",
+      "pos": [
+        1160,
+        140
+      ],
+      "size": [
+        380,
+        640
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "dit_model",
+          "type": "ACESTEP_DIT",
+          "link": 4
+        },
+        {
+          "name": "lm_plan",
+          "type": "ACESTEP_PLAN",
+          "link": null
+        },
+        {
+          "name": "task_config",
+          "type": "ACESTEP_TASK_CONFIG",
+          "link": 5
+        },
+        {
+          "name": "reference_audio",
+          "type": "ACESTEP_REFERENCE_AUDIO",
+          "link": null
+        },
+        {
+          "name": "metadata",
+          "type": "ACESTEP_METADATA",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
+          "type": "ACESTEP_LATENT",
+          "links": [
+            7
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "generation_info",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AceStepSampler"
+      },
+      "widgets_values": [
+        45,
+        7.0,
+        2.0,
+        "ode",
+        "euler",
+        false,
+        0.0,
+        1.0,
+        1.0,
+        42,
+        "fixed",
+        1,
+        true,
+        "modern cinematic pop-rock backing track, driving live drums, warm bassline, grand piano, sweeping orchestral strings",
+        "",
+        false,
+        "en",
+        0,
+        "auto",
+        "auto",
+        -1.0,
+        "",
+        false,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "id": 7,
+      "type": "AceStepVAEDecode",
+      "pos": [
+        1600,
+        260
+      ],
+      "size": [
+        320,
+        290
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae_model",
+          "type": "ACESTEP_VAE",
+          "link": 6
+        },
+        {
+          "name": "latent",
+          "type": "ACESTEP_LATENT",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            8
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "AceStepVAEDecode"
+      },
+      "widgets_values": [
+        true,
+        256,
+        64,
+        true,
+        true,
+        true,
+        true,
+        -1.0
+      ]
+    },
+    {
+      "id": 8,
+      "type": "SaveAudio",
+      "pos": [
+        1980,
+        260
+      ],
+      "size": [
+        280,
+        120
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 8
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "SaveAudio"
+      },
+      "widgets_values": [
+        "audio/acestep_06_vocal2bgm"
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      2,
+      0,
+      3,
+      0,
+      "ACESTEP_VAE"
+    ],
+    [
+      2,
+      1,
+      0,
+      3,
+      1,
+      "AUDIO"
+    ],
+    [
+      3,
+      3,
+      0,
+      4,
+      0,
+      "ACESTEP_AUDIO_LATENT"
+    ],
+    [
+      4,
+      5,
+      0,
+      6,
+      0,
+      "ACESTEP_DIT"
+    ],
+    [
+      5,
+      4,
+      0,
+      6,
+      2,
+      "ACESTEP_TASK_CONFIG"
+    ],
+    [
+      6,
+      2,
+      0,
+      7,
+      0,
+      "ACESTEP_VAE"
+    ],
+    [
+      7,
+      6,
+      0,
+      7,
+      1,
+      "ACESTEP_LATENT"
+    ],
+    [
+      8,
+      7,
+      0,
+      8,
+      0,
+      "AUDIO"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.85,
+      "offset": [
+        40,
+        40
+      ]
+    },
+    "workflow_title": "ACE-Step 1.5 \u2014 06 Vocal2BGM Accompaniment (12GB VRAM)",
+    "package": "ComfyUI-Bao-Ace_Step_1_5"
+  },
+  "version": 0.4
+}

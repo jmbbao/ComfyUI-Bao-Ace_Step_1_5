@@ -1,0 +1,30 @@
+# ==============================================================================
+# ComfyUI-Bao-Ace_Step_1_5 — Requirements
+# Target runtime: ComfyUI on Python 3.13 (also compatible with Python 3.12)
+# ==============================================================================
+
+# Official ACE-Step 1.5 package (provides AceStepHandler, LLMHandler, constants,
+# model_downloader, and core DiT/LM generation mixins).
+# If you prefer a local editable clone, install it with: pip install -e /path/to/ACE-Step-1.5
+git+https://github.com/ace-step/ACE-Step-1.5.git
+
+# Core model & tensor libraries
+safetensors>=0.4.5
+transformers>=4.51.0,<4.58.0
+diffusers>=0.32.0
+accelerate>=1.1.0
+huggingface_hub>=0.27.0
+einops>=0.8.1
+vector-quantize-pytorch>=1.27.15
+
+# Audio & logging utilities used by ACE-Step 1.5
+scipy>=1.10.1
+soundfile>=0.13.1
+loguru>=0.7.3
+
+# Native PyTorch quantization (recommended for Python 3.12 / 3.13 INT8 dynamic & weight-only).
+# NOTE: Match torchao to your installed PyTorch build (unpinned torchao >=0.18 may require
+# PyTorch >=2.8 for torch.nn.functional.ScalingType; for PyTorch 2.7.x use torchao<=0.11.0).
+# If torchao is unavailable or incompatible, this node pack automatically falls back to a
+# pure-PyTorch Int8DynamicLinear backend with full .safetensors save/load support.
+torchao>=0.9.0,<0.18.0
