@@ -22,7 +22,7 @@ Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to 
   - **LRC Generation** with DTW cross-attention alignment and optional `.lrc` file export (`AceStepLRCGenerator`)
   - **Quality Scoring** combining DiT lyric alignment + sequential 5Hz LM PMI/reward scoring (`AceStepQualityScorer`)
 
-## Installation
+## Installation (WARNING: not finished yet, commented out entries in requirements.txt)
 
 1. Place this folder in `ComfyUI/custom_nodes/ComfyUI-Bao-Ace_Step_1_5/`.
 2. Install dependencies into ComfyUI's Python environment:
