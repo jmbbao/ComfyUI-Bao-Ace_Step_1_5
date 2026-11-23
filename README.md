@@ -1,3 +1,5 @@
+WORK IN PROGRESS YET, NOT FINISHED <<<<<<<<<<<<<
+
 # ComfyUI-Bao-Ace_Step_1_5
 
 Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to run **DiT XL (4B) + 5Hz LM (4B) + AutoencoderOobleck VAE** reliably on **12 GB VRAM GPUs** on **Python 3.13** (and Python 3.12).
