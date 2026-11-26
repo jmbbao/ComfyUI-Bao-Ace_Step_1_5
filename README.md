@@ -33,6 +33,7 @@ I will use the /ComfyUI folder, if your ComfyUI folder is named differently pay 
 ### 1. Dowload ComfyUI-Bao-Ace_Step_1_5
 
 Open a terminal in /ComfyUI/custom_nodes:
+
 ```bash
 git clone https://github.com/jmbbao/ComfyUI-Bao-Ace_Step_1_5.git
 ```
@@ -46,6 +47,7 @@ For Linux with venv environment:
 (for windows or a different environment, ask some AI to convert these orders to the ones you need, it will ask you to know if you uses uv environment, etc)
 
 Open a terminal in /ComfyUI folder (root of ComfyUI) and (in Linux with venv) execute these orders:
+
 ```bash
 source venv/bin/activate
 pip install -r ./custom_nodes/ComfyUI-Bao-Ace_Step_1_5/requirements.txt
@@ -57,6 +59,7 @@ deactivate
 I have disabled one of the entries in requirements.txt because it could change things in the system and it is better to install it manually and also because you have to make a change if you have Python 3.13 because by default it only allows Python 3.12
 
 The package appears like this in requirements.txt: (it's a comment for that initial #, it hasn't been installed)
+
 ```bash
 # git+https://github.com/ace-step/ACE-Step-1.5.git
 ```
@@ -64,6 +67,7 @@ The package appears like this in requirements.txt: (it's a comment for that init
 We install it like this:
 
 Open a terminal in the /ComfyUI directory and download the code (it will go down to /ComfyUI/ACE-Step-1.5):
+
 ```bash
 git clone https://github.com/ace-step/ACE-Step-1.5.git
 ```
@@ -81,6 +85,7 @@ It will also work with Python 3.13, in addition to 3.12.
 
 In `pyproject.toml`, look for the actual package name; it appears after `[project]`.
 You will see the following:
+
 ```bash
 [project]
 name = "ace-step"
@@ -95,6 +100,7 @@ pip install --no-deps ./ACE-Step-1.5
 You can now delete the /ComfyUI/ACE-Step-1.5 folder as it is no longer used.
 
 When you want to uninstall the package, indicate its real name with which it was installed:
+
 ```bash
 pip uninstall ace-step
 ```
@@ -151,3 +157,4 @@ Drag and drop any `.json` file from `workflows/` directly into ComfyUI:
 10. `workflows/10_audio_understanding.json` — Reverse-engineer caption, lyrics, and metadata from audio
 11. `workflows/11_lrc_generation.json` — Generate music + aligned `.lrc` timestamps
 12. `workflows/12_quality_scoring.json` — Generate music + sequential DiT alignment & LM PMI scoring
+
