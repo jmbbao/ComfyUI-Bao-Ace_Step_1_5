@@ -55,8 +55,9 @@ deactivate
 3. I have disabled one of the entries in requirements.txt because it could change things in the system and it is better to install it manually and also because you have to make a change if you have Python 3.13 because by default it only allows Python 3.12
 
 The package appears like this in requirements.txt: (it's a comment for that initial #, it hasn't been installed)
-
+```bash
 # git+https://github.com/ace-step/ACE-Step-1.5.git
+```
 
 We install it like this:
 
