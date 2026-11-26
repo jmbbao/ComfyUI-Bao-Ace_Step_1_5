@@ -31,7 +31,15 @@ Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to 
 pip install -r ComfyUI/custom_nodes/ComfyUI-Bao-Ace_Step_1_5/requirements.txt
 ```
 
-3. Models are stored in `ComfyUI/models/acestep/`. With `auto_download=True` (default), official Hugging Face checkpoints (`ACE-Step/Ace-Step1.5` and sub-models) are fetched automatically on first use.
+3. Models are stored in your configured `acestep` folder from `ComfyUI/extra_model_paths.yaml` (if defined, prioritized for all downloads and INT8 exports without creating an empty default folder), or in `ComfyUI/models/acestep/` by default. Example `extra_model_paths.yaml` entry:
+
+```yaml
+shared_models:
+  base_path: /path/to/your/models
+  acestep: acestep
+```
+
+With `auto_download=True` (default), official Hugging Face checkpoints (`ACE-Step/Ace-Step1.5` and sub-models) are fetched automatically into that folder on first use.
 
 ## Node Catalog (19 Nodes)
 
