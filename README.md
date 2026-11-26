@@ -26,7 +26,7 @@ Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to 
   - **LRC Generation** with DTW cross-attention alignment and optional `.lrc` file export (`AceStepLRCGenerator`)
   - **Quality Scoring** combining DiT lyric alignment + sequential 5Hz LM PMI/reward scoring (`AceStepQualityScorer`)
 
-## Installation
+## INSTALLATION
 
 I will use the /ComfyUI folder, if your ComfyUI folder is named differently pay attention to change it in the orders below.
 
