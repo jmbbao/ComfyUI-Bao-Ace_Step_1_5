@@ -90,9 +90,11 @@ You will see the following:
 [project]
 name = "ace-step"
 ```
+
 Once installed, the actual name will be: ace-step (we will use this when uninstalling).
 
 We install it using pip, without including any of its dependencies, to ensure that no other packages are altered:
+
 ```bash
 pip install --no-deps ./ACE-Step-1.5
 ```
@@ -114,6 +116,7 @@ pip show ace-step
 If you are using `extra_model_paths.yaml` to point to a `/models` folder other than `/ComfyUI/models`, the models will be downloaded to the `acestep` folder that you specify in `extra_model_paths.yaml`—make sure to include it.
 
 Example `extra_model_paths.yaml` entry:
+
 ```yaml
 shared_models:
   base_path: /path/to/your/models
