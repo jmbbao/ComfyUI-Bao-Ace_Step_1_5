@@ -6,7 +6,9 @@
 # Official ACE-Step 1.5 package (provides AceStepHandler, LLMHandler, constants,
 # model_downloader, and core DiT/LM generation mixins).
 # If you prefer a local editable clone, install it with: pip install -e /path/to/ACE-Step-1.5
-git+https://github.com/ace-step/ACE-Step-1.5.git
+
+# git+https://github.com/ace-step/ACE-Step-1.5.git
+# This must be installed manually, see readme
 
 # Core model & tensor libraries
 safetensors>=0.4.5
@@ -27,4 +29,7 @@ loguru>=0.7.3
 # PyTorch >=2.8 for torch.nn.functional.ScalingType; for PyTorch 2.7.x use torchao<=0.11.0).
 # If torchao is unavailable or incompatible, this node pack automatically falls back to a
 # pure-PyTorch Int8DynamicLinear backend with full .safetensors save/load support.
-torchao>=0.9.0,<0.18.0
+
+# See readme for this change
+# torchao>=0.9.0,<0.18.0
+torchao>=0.9.0
