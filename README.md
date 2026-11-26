@@ -7,7 +7,7 @@ Enables the execution —using only 12 GB of VRAM— of configurations that prev
 
 Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to run **DiT XL (4B) + 5Hz LM (4B) + AutoencoderOobleck VAE** reliably on **12 GB VRAM GPUs** on **Python 3.13** (and Python 3.12).
 
-## Complete Feature Set (Phase 1 + Phase 2)
+## Complete Feature Set
 
 - **Core Text-to-Music & Simple Mode:** Natural-language query rewriting, structured lyrics (`[Verse]`, `[Chorus]`, etc.), 50+ vocal languages, instrumental mode, granular metadata control, and `10s–600s` duration.
 - **5Hz Language Model (`pt` backend):** `acestep-5Hz-lm-0.6B`, `1.7B`, and `4B` for Chain-of-Thought planning, advanced Query Rewriting, 5Hz semantic codes, Audio Understanding, and LM PMI Quality Scoring.
