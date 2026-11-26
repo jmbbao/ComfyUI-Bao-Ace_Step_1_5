@@ -1,5 +1,5 @@
 # >> WORK IN PROGRESS << 
->> NOT FINISHED but working already<<
+*NOT FINISHED BUT ALREADY WORKING*
 
 # ComfyUI-Bao-Ace_Step_1_5
 
