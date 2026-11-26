@@ -23,18 +23,20 @@ Complete reference for all 19 custom nodes in **ComfyUI-Bao-Ace_Step_1_5**, orga
 
 ## 1. Loaders (`ACE-Step 1.5/Loaders`)
 
+> **Model Directory Resolution (`extra_model_paths.yaml`):** If `ComfyUI/extra_model_paths.yaml` defines an `acestep:` folder, all loaders automatically prioritize that path for scanning, downloading (DiT, 5Hz LM, VAE, `Qwen3-Embedding-0.6B`), and saving quantized `*_int8_convrot` checkpoints—without creating an empty `ComfyUI/models/acestep/` folder.
+
 ### `AceStepLMLoader` — ACE-Step 1.5 LM Loader (5Hz)
 Prepares a lazy 5Hz Language Model handle using the native PyTorch (`pt`) backend for full Python 3.12/3.13 compatibility.
 - **Inputs (Required):**
-  - `model_path`: Checkpoint in `ComfyUI/models/acestep/` (`acestep-5Hz-lm-0.6B`, `1.7B`, `4B`, or local quantized `*_int8_convrot` folder). Selecting a `*_int8_convrot` folder directly auto-detects INT8 even if `precision` is set to `bf16`/`fp16`.
+  - `model_path`: Checkpoint in your configured `acestep` models folder (`extra_model_paths.yaml` or `ComfyUI/models/acestep/`; `acestep-5Hz-lm-0.6B`, `1.7B`, `4B`, or local quantized `*_int8_convrot` folder). Selecting a `*_int8_convrot` folder directly auto-detects INT8 even if `precision` is set to `bf16`/`fp16`.
   - `device`: `auto_offload` *(12 GB recommended)*, `cuda`, or `cpu`.
   - `precision`: `int8_dynamic` *(12 GB recommended for 4B)*, `bf16`, or `fp16`.
   - `save_quantized`: Export INT8 weights + scales to `.safetensors` on first run (default `False`).
   - `save_suffix`: Sibling directory suffix (default `_int8_convrot`). Checked **before** any download; if `<model_path><save_suffix>` already exists, the original folder is not required and will not be re-downloaded.
-  - `auto_download`: Fetch missing official Hugging Face weights automatically (default `True`).
+  - `auto_download`: Fetch missing official Hugging Face weights automatically into the configured `acestep` directory (default `True`).
 - **Inputs (Optional):**
   - `overwrite_quantized`: Re-quantize and overwrite an existing `save_suffix` folder (default `False`).
-  - `delete_original_after_quantize`: Automatically remove the original full-precision folder inside `models/acestep/` after `save_quantized=True` writes and verifies the INT8 export (default `False`).
+  - `delete_original_after_quantize`: Automatically remove the original full-precision folder inside your configured `acestep` directory after `save_quantized=True` writes and verifies the INT8 export (default `False`).
 - **Outputs:** `lm_model` (`ACESTEP_LM`).
 
 ### `AceStepDiTLoader` — ACE-Step 1.5 DiT Loader (2B / XL 4B)
@@ -42,20 +44,20 @@ Prepares a lazy DiT + `Qwen3-Embedding-0.6B` handle without loading the VAE.
 - **Inputs (Required):**
   - `model_path`: `acestep-v15-xl-base`, `acestep-v15-xl-sft`, `acestep-v15-xl-turbo`, `acestep-v15-base`, `acestep-v15-sft`, `acestep-v15-turbo`, or local quantized `*_int8_convrot` folder (auto-detected as INT8 regardless of `precision`).
   - `precision`: `int8_dynamic` *(12 GB recommended for XL 4B)*, `bf16`, or `fp16`.
-  - `save_quantized`: Save quantized decoder layers to `<model><save_suffix>/model_int8.safetensors` (default `False`).
+  - `save_quantized`: Save quantized decoder layers to `<model><save_suffix>/model_int8.safetensors` inside the configured `acestep` directory (default `False`).
   - `save_suffix`: Default `_int8_convrot`. Checked **before** any download so you can delete the original full-precision folder without triggering re-downloads.
   - `offload_dit_to_cpu`: Enable block-by-block CPU offloading when free VRAM drops below `vram_offload_threshold_gb` (default `True`).
   - `vram_offload_threshold_gb`: Free VRAM safety floor in GB (default `1.5`).
   - `use_flash_attention`: Prefer Flash Attention 2 when installed, falling back to SDPA/eager (default `True`).
-  - `auto_download`: Auto-fetch missing DiT weights and isolated `Qwen3-Embedding-0.6B/*` files without pulling unrelated base models (default `True`).
+  - `auto_download`: Auto-fetch missing DiT weights and isolated `Qwen3-Embedding-0.6B/*` files into the configured `acestep` directory without pulling unrelated base models (default `True`).
 - **Inputs (Optional):**
   - `overwrite_quantized`: Re-quantize and overwrite an existing `save_suffix` folder (default `False`).
-  - `delete_original_after_quantize`: Automatically remove the original full-precision folder inside `models/acestep/` after `save_quantized=True` writes and verifies the INT8 export (default `False`).
+  - `delete_original_after_quantize`: Automatically remove the original full-precision folder inside your configured `acestep` directory after `save_quantized=True` writes and verifies the INT8 export (default `False`).
 - **Outputs:** `dit_model` (`ACESTEP_DIT`).
 
 ### `AceStepVAELoader` — ACE-Step 1.5 VAE Loader
 Prepares a lazy `AutoencoderOobleck` handle for 48 kHz stereo encoding and decoding.
-- **Inputs (Required):** `model_path` (`vae`, `scragvae`, or local folder), `device` (`cuda`, `cpu`), `precision` (`fp16`, `bf16`, `fp32`), `auto_download` (`True`).
+- **Inputs (Required):** `model_path` (`vae`, `scragvae`, or local folder), `device` (`cuda`, `cpu`), `precision` (`fp16`, `bf16`, `fp32`), `auto_download` (`True`, downloads into the configured `acestep` directory).
 - **Outputs:** `vae_model` (`ACESTEP_VAE`).
 
 ---

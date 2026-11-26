@@ -49,9 +49,9 @@ class AceStepLMLoader:
                     {
                         "default": default_lm,
                         "tooltip": (
-                            "5Hz Language Model checkpoint inside ComfyUI/models/acestep/ "
-                            "(e.g. acestep-5Hz-lm-0.6B, 1.7B, or 4B). Local quantized folders "
-                            "are detected automatically."
+                            "5Hz Language Model checkpoint inside your configured 'acestep' models "
+                            "directory (extra_model_paths.yaml or ComfyUI/models/acestep/; e.g. "
+                            "acestep-5Hz-lm-0.6B, 1.7B, or 4B). Local quantized folders are detected automatically."
                         ),
                     },
                 ),
@@ -104,7 +104,7 @@ class AceStepLMLoader:
                         "default": True,
                         "tooltip": (
                             "Automatically download missing official checkpoints from Hugging Face "
-                            "into ComfyUI/models/acestep/."
+                            "into the 'acestep' path configured in extra_model_paths.yaml (or ComfyUI/models/acestep/)."
                         ),
                     },
                 ),
@@ -126,8 +126,8 @@ class AceStepLMLoader:
                         "default": False,
                         "tooltip": (
                             "Optional disk-saving cleanup: when save_quantized=True finishes writing and "
-                            "verifying the INT8 folder inside models/acestep/, automatically delete the "
-                            "original full-precision checkpoint folder."
+                            "verifying the INT8 folder inside your configured ACE-Step models directory, "
+                            "automatically delete the original full-precision checkpoint folder."
                         ),
                     },
                 ),
@@ -145,7 +145,7 @@ class AceStepLMLoader:
         overwrite_quantized: bool = False,
         delete_original_after_quantize: bool = False,
     ) -> Tuple[AceStepLMHandle]:
-        models_dir = get_acestep_models_dir()
+        models_dir = get_acestep_models_dir(create=False)
 
         # Cache-first resolution: reuse existing *_int8_convrot or directly selected INT8
         # checkpoint BEFORE ever looking up or downloading the original full-precision model.
@@ -304,7 +304,8 @@ class AceStepDiTLoader:
                         "default": True,
                         "tooltip": (
                             "Automatically download missing DiT or Qwen3-Embedding-0.6B weights "
-                            "from Hugging Face into ComfyUI/models/acestep/."
+                            "from Hugging Face into the 'acestep' path configured in "
+                            "extra_model_paths.yaml (or ComfyUI/models/acestep/)."
                         ),
                     },
                 ),
@@ -326,8 +327,8 @@ class AceStepDiTLoader:
                         "default": False,
                         "tooltip": (
                             "Optional disk-saving cleanup: when save_quantized=True finishes writing and "
-                            "verifying the INT8 folder inside models/acestep/, automatically delete the "
-                            "original full-precision checkpoint folder."
+                            "verifying the INT8 folder inside your configured ACE-Step models directory, "
+                            "automatically delete the original full-precision checkpoint folder."
                         ),
                     },
                 ),
@@ -347,7 +348,7 @@ class AceStepDiTLoader:
         overwrite_quantized: bool = False,
         delete_original_after_quantize: bool = False,
     ) -> Tuple[AceStepDiTHandle]:
-        models_dir = get_acestep_models_dir()
+        models_dir = get_acestep_models_dir(create=False)
 
         # Cache-first resolution: reuse existing *_int8_convrot or directly selected INT8
         # checkpoint BEFORE ever looking up or downloading the original full-precision model.
@@ -426,8 +427,8 @@ class AceStepVAELoader:
                     {
                         "default": default_vae,
                         "tooltip": (
-                            "VAE checkpoint folder inside ComfyUI/models/acestep/ "
-                            "('vae' for official AutoencoderOobleck or 'scragvae')."
+                            "VAE checkpoint folder inside your configured 'acestep' models directory "
+                            "(extra_model_paths.yaml or ComfyUI/models/acestep/; 'vae' or 'scragvae')."
                         ),
                     },
                 ),
@@ -457,7 +458,7 @@ class AceStepVAELoader:
                         "default": True,
                         "tooltip": (
                             "Automatically download missing official VAE weights from Hugging Face "
-                            "into ComfyUI/models/acestep/."
+                            "into the 'acestep' path configured in extra_model_paths.yaml (or ComfyUI/models/acestep/)."
                         ),
                     },
                 ),
@@ -471,7 +472,7 @@ class AceStepVAELoader:
         precision: str,
         auto_download: bool,
     ) -> Tuple[AceStepVAEHandle]:
-        models_dir = get_acestep_models_dir()
+        models_dir = get_acestep_models_dir(create=False)
         vae_dir = ensure_component_available(model_path, category="vae", auto_download=auto_download)
 
         handle = AceStepVAEHandle(

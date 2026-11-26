@@ -36,8 +36,8 @@ from .nodes_vae import (
     NODE_DISPLAY_NAME_MAPPINGS as VAE_NODE_DISPLAY_NAME_MAPPINGS,
 )
 
-# Register ComfyUI/models/acestep on import
-get_acestep_models_dir()
+# Register ACE-Step folder extensions in ComfyUI folder_paths without creating unused folders
+get_acestep_models_dir(create=False)
 
 NODE_CLASS_MAPPINGS = {
     **LOADER_NODE_CLASS_MAPPINGS,

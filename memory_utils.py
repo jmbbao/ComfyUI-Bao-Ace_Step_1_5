@@ -74,31 +74,194 @@ QUANT_WEIGHTS_FILENAME = "model_int8.safetensors"
 # ==============================================================================
 
 
-def get_acestep_models_dir() -> Path:
-    """Return and register ComfyUI's ``models/acestep`` directory."""
+ACESTEP_FOLDER_KEYS: Tuple[str, ...] = ("acestep", "ace_step", "ace-step")
+ACESTEP_FILE_EXTENSIONS = {".safetensors", ".pt", ".bin", ".json"}
+
+
+def _norm_path_key(path: Path) -> str:
+    """Return a normalized comparison key safe for non-existent paths on Linux/Windows/macOS."""
+    return os.path.normcase(os.path.abspath(str(path.expanduser())))
+
+
+def _get_default_comfy_acestep_dir() -> Optional[Path]:
+    """Return ComfyUI's default ``<models_dir>/acestep`` path without creating it."""
+    if folder_paths is None:
+        return None
+    models_dir = getattr(folder_paths, "models_dir", None)
+    if not models_dir:
+        return None
+    return Path(models_dir) / "acestep"
+
+
+def _collect_comfy_registered_acestep_paths() -> Tuple[List[Path], List[Path]]:
+    """Inspect ``folder_paths`` for ``acestep`` paths configured via ``extra_model_paths.yaml``.
+
+    Returns:
+        Tuple ``(extra_paths, default_paths)`` preserving YAML registration order and
+        ensuring ``folder_paths.folder_names_and_paths["acestep"]`` includes ACE-Step
+        file extensions without appending ``ComfyUI/models/acestep`` when extra paths exist.
+    """
+    if folder_paths is None:
+        return [], []
+
+    default_dir = _get_default_comfy_acestep_dir()
+    default_key = _norm_path_key(default_dir) if default_dir is not None else None
+
+    fmap = getattr(folder_paths, "folder_names_and_paths", None)
+    if not isinstance(fmap, dict):
+        return [], []
+
+    raw_paths: List[str] = []
+    matched_keys: List[str] = []
+
+    # Check canonical "acestep" first, then case-insensitive / common alias keys
+    for key in ACESTEP_FOLDER_KEYS:
+        if key in fmap:
+            matched_keys.append(key)
+    for key in list(fmap.keys()):
+        if key not in matched_keys and key.lower() in ACESTEP_FOLDER_KEYS:
+            matched_keys.append(key)
+
+    for key in matched_keys:
+        entry = fmap[key]
+        if isinstance(entry, tuple) and len(entry) >= 1:
+            paths_list = entry[0]
+            exts = entry[1] if len(entry) >= 2 else None
+            if isinstance(paths_list, (list, tuple)):
+                raw_paths.extend(str(p) for p in paths_list if p)
+            if isinstance(exts, set):
+                exts.update(ACESTEP_FILE_EXTENSIONS)
+
+    # Also consult folder_paths.get_folder_paths("acestep") if available
+    if hasattr(folder_paths, "get_folder_paths"):
+        for key in matched_keys or ["acestep"]:
+            try:
+                for p in folder_paths.get_folder_paths(key):
+                    if p and str(p) not in raw_paths:
+                        raw_paths.append(str(p))
+            except KeyError:
+                pass
+            except Exception:
+                pass
+
+    extra_paths: List[Path] = []
+    default_paths: List[Path] = []
+    seen_keys: set[str] = set()
+
+    for raw in raw_paths:
+        p = Path(raw).expanduser()
+        k = _norm_path_key(p)
+        if k in seen_keys:
+            continue
+        seen_keys.add(k)
+        if default_key is not None and k == default_key:
+            default_paths.append(p)
+        else:
+            extra_paths.append(p)
+
+    return extra_paths, default_paths
+
+
+def get_acestep_search_dirs() -> List[Path]:
+    """Return ordered ACE-Step model root directories for reading/discovering checkpoints.
+
+    Order of precedence:
+    1. Paths configured for ``acestep`` in ComfyUI's ``extra_model_paths.yaml`` (in YAML order).
+    2. ``ComfyUI/models/acestep`` ONLY if it already exists on disk (or as fallback when no
+       extra paths are configured).
+    3. ``ACESTEP_CHECKPOINTS_DIR`` environment variable / ``./models/acestep`` outside ComfyUI.
+    """
+    dirs: List[Path] = []
+    seen: set[str] = set()
+
+    def _add(path: Optional[Path]) -> None:
+        if path is None:
+            return
+        k = _norm_path_key(path)
+        if k not in seen:
+            seen.add(k)
+            dirs.append(path)
+
     if folder_paths is not None:
-        base_models_dir = Path(folder_paths.models_dir)
-        acestep_dir = base_models_dir / "acestep"
-        acestep_dir.mkdir(parents=True, exist_ok=True)
+        extra_paths, _default_paths = _collect_comfy_registered_acestep_paths()
+        for p in extra_paths:
+            _add(p)
+
+        default_dir = _get_default_comfy_acestep_dir()
+        if extra_paths:
+            # Include ComfyUI/models/acestep for lookup ONLY if it already exists on disk;
+            # never create an empty default directory when extra_model_paths.yaml is configured.
+            if default_dir is not None and default_dir.is_dir():
+                _add(default_dir)
+        else:
+            env_dir = os.environ.get("ACESTEP_CHECKPOINTS_DIR")
+            if env_dir:
+                _add(Path(env_dir).expanduser().resolve())
+            if default_dir is not None:
+                _add(default_dir)
+        return dirs
+
+    env_dir = os.environ.get("ACESTEP_CHECKPOINTS_DIR")
+    if env_dir:
+        _add(Path(env_dir).expanduser().resolve())
+    _add(Path.cwd() / "models" / "acestep")
+    return dirs
+
+
+def get_acestep_models_dir(create: bool = True) -> Path:
+    """Return the primary ACE-Step models directory for downloads, writes, and INT8 exports.
+
+    Strictly honors ``acestep`` paths configured in ComfyUI's ``extra_model_paths.yaml``
+    (always prioritizing the configured extra path even without ``is_default: true``) and
+    avoids creating an empty ``ComfyUI/models/acestep`` folder when an extra path exists.
+    """
+    if folder_paths is not None:
+        extra_paths, _default_paths = _collect_comfy_registered_acestep_paths()
+        if extra_paths:
+            primary_dir = extra_paths[0]
+            if create:
+                primary_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure "acestep" key exists in folder_paths with our extensions (pointing to extra_paths)
+            if "acestep" not in folder_paths.folder_names_and_paths:
+                folder_paths.folder_names_and_paths["acestep"] = (
+                    [str(p) for p in extra_paths],
+                    set(ACESTEP_FILE_EXTENSIONS),
+                )
+            return primary_dir
+
+        env_dir = os.environ.get("ACESTEP_CHECKPOINTS_DIR")
+        if env_dir:
+            primary_dir = Path(env_dir).expanduser().resolve()
+        else:
+            primary_dir = _get_default_comfy_acestep_dir() or (Path.cwd() / "models" / "acestep")
+
+        if create:
+            primary_dir.mkdir(parents=True, exist_ok=True)
+
         if "acestep" not in folder_paths.folder_names_and_paths:
             folder_paths.folder_names_and_paths["acestep"] = (
-                [str(acestep_dir)],
-                {".safetensors", ".pt", ".bin", ".json"},
+                [str(primary_dir)],
+                set(ACESTEP_FILE_EXTENSIONS),
             )
         else:
-            existing_paths, _ = folder_paths.folder_names_and_paths["acestep"]
-            if str(acestep_dir) not in existing_paths:
-                existing_paths.append(str(acestep_dir))
-        return acestep_dir
+            existing_paths, exts = folder_paths.folder_names_and_paths["acestep"]
+            if isinstance(exts, set):
+                exts.update(ACESTEP_FILE_EXTENSIONS)
+            primary_key = _norm_path_key(primary_dir)
+            if not any(_norm_path_key(Path(p)) == primary_key for p in existing_paths):
+                existing_paths.append(str(primary_dir))
+        return primary_dir
 
     env_dir = os.environ.get("ACESTEP_CHECKPOINTS_DIR")
     if env_dir:
         path = Path(env_dir).expanduser().resolve()
-        path.mkdir(parents=True, exist_ok=True)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
 
     fallback = Path.cwd() / "models" / "acestep"
-    fallback.mkdir(parents=True, exist_ok=True)
+    if create:
+        fallback.mkdir(parents=True, exist_ok=True)
     return fallback
 
 
@@ -122,15 +285,16 @@ def _dir_has_checkpoint_files(path: Path) -> bool:
 
 
 def list_checkpoint_choices(category: str) -> List[str]:
-    """List local checkpoints in ``models/acestep/`` merged with official presets.
+    """List local checkpoints across all configured ACE-Step directories merged with official presets.
 
     Args:
         category: One of ``"lm"``, ``"dit"``, or ``"vae"``.
     """
-    models_dir = get_acestep_models_dir()
     local_matches: List[str] = []
 
-    if models_dir.exists():
+    for models_dir in get_acestep_search_dirs():
+        if not models_dir.is_dir():
+            continue
         for entry in sorted(models_dir.iterdir()):
             name = entry.name
             lower = name.lower()
@@ -170,11 +334,17 @@ def list_checkpoint_choices(category: str) -> List[str]:
 
 
 def resolve_checkpoint_path(model_path: str) -> Path:
-    """Resolve a relative checkpoint name inside ``models/acestep/`` or an absolute path."""
+    """Resolve a checkpoint across all configured ACE-Step directories, or default to primary dir."""
     candidate = Path(model_path).expanduser()
     if candidate.is_absolute():
         return candidate
-    return get_acestep_models_dir() / model_path
+
+    for root in get_acestep_search_dirs():
+        found = root / model_path
+        if found.is_file() or (found.is_dir() and _dir_has_checkpoint_files(found)):
+            return found
+
+    return get_acestep_models_dir(create=False) / model_path
 
 
 def _ensure_acestep_package() -> None:
@@ -193,28 +363,29 @@ def ensure_component_available(
     category: str,
     auto_download: bool = True,
 ) -> Path:
-    """Ensure a requested model component exists under ``models/acestep/``.
+    """Ensure a requested model component exists locally across configured ACE-Step directories.
 
-    If ``auto_download`` is True and the checkpoint is missing locally, uses
-    ``acestep.model_downloader`` (falling back to ``huggingface_hub.snapshot_download``)
-    to fetch the weights into ``ComfyUI/models/acestep/``.
+    If ``auto_download`` is True and the checkpoint is missing from all configured paths,
+    downloads directly into ``get_acestep_models_dir()`` (honoring ``extra_model_paths.yaml``).
     """
-    models_dir = get_acestep_models_dir()
-    resolved = resolve_checkpoint_path(model_name)
+    existing = resolve_checkpoint_path(model_name)
+    if existing.is_file() or (existing.is_dir() and _dir_has_checkpoint_files(existing)):
+        return existing
 
-    if resolved.is_file() or (resolved.is_dir() and _dir_has_checkpoint_files(resolved)):
-        return resolved
+    models_dir = get_acestep_models_dir(create=auto_download)
+    candidate_path = Path(model_name).expanduser()
+    resolved = candidate_path if candidate_path.is_absolute() else (models_dir / model_name)
 
     if not auto_download:
+        searched = ", ".join(str(p) for p in get_acestep_search_dirs())
         raise FileNotFoundError(
-            f"Checkpoint '{model_name}' was not found at '{resolved}' and auto_download is disabled. "
+            f"Checkpoint '{model_name}' was not found in [{searched}] and auto_download is disabled. "
             f"Place the checkpoint in '{models_dir}' or enable auto_download."
         )
 
     logger.info(
-        "[ACE-Step 1.5] Checkpoint '%s' missing at '%s'; downloading into '%s'...",
+        "[ACE-Step 1.5] Checkpoint '%s' missing locally; downloading into '%s'...",
         model_name,
-        resolved,
         models_dir,
     )
 
@@ -245,9 +416,10 @@ def ensure_component_available(
 
         models_dir.mkdir(parents=True, exist_ok=True)
         logger.info(
-            "[ACE-Step 1.5] Downloading isolated subfolder '%s/*' from '%s'...",
+            "[ACE-Step 1.5] Downloading isolated subfolder '%s/*' from '%s' into '%s'...",
             subdir,
             MAIN_MODEL_REPO,
+            models_dir,
         )
         snapshot_download(
             repo_id=MAIN_MODEL_REPO,
@@ -821,12 +993,21 @@ def apply_int8_dynamic_quantization(
     return "int8_dynamic_linear"
 
 
-def get_quantized_save_dir(source_dir: Path, save_suffix: str) -> Path:
-    """Compute the quantized output directory next to ``source_dir`` preserving its base name."""
+def get_quantized_save_dir(
+    source_dir: Path,
+    save_suffix: str,
+    target_root: Optional[Path] = None,
+) -> Path:
+    """Compute the quantized output directory preserving the base model name.
+
+    When ``target_root`` is provided (e.g. the primary ``extra_model_paths.yaml`` directory),
+    new quantized folders are written under ``target_root``; otherwise next to ``source_dir``.
+    """
     suffix = (save_suffix or "_int8_convrot").strip()
     if source_dir.name.endswith(suffix):
         return source_dir
-    return source_dir.parent / f"{source_dir.name}{suffix}"
+    base_root = target_root if target_root is not None else source_dir.parent
+    return base_root / f"{source_dir.name}{suffix}"
 
 
 def is_quantized_checkpoint_dir(path: Path) -> bool:
@@ -877,7 +1058,8 @@ def verify_quantized_checkpoint_complete(quant_dir: Path, scope: str) -> Tuple[b
 def safe_delete_original_checkpoint(source_dir: Path, quantized_dir: Path, scope: str) -> bool:
     """Safely remove the original full-precision checkpoint folder after verifying the INT8 export.
 
-    Refuses to delete anything outside ``ComfyUI/models/acestep/``, refuses to delete if
+    Refuses to delete anything outside the registered ACE-Step model root directories
+    (``extra_model_paths.yaml`` paths or ``ComfyUI/models/acestep``), refuses to delete if
     ``source_dir == quantized_dir`` or if ``source_dir`` is itself a quantized folder, and
     only proceeds once ``verify_quantized_checkpoint_complete`` passes completely.
     """
@@ -894,7 +1076,10 @@ def safe_delete_original_checkpoint(source_dir: Path, quantized_dir: Path, scope
     try:
         src_resolved = source_dir.resolve()
         q_resolved = quantized_dir.resolve()
-        models_root = get_acestep_models_dir().resolve()
+        allowed_roots = {
+            _norm_path_key(root.resolve())
+            for root in (get_acestep_search_dirs() + [get_acestep_models_dir(create=False)])
+        }
     except OSError as exc:
         logger.warning("[ACE-Step 1.5] Skipping deletion of '%s': path resolution failed (%s).", source_dir, exc)
         return False
@@ -906,11 +1091,10 @@ def safe_delete_original_checkpoint(source_dir: Path, quantized_dir: Path, scope
     if is_quantized_checkpoint_dir(src_resolved):
         logger.warning("[ACE-Step 1.5] Refusing to delete quantized checkpoint directory '%s'.", src_resolved)
         return False
-    if src_resolved.parent != models_root:
+    if _norm_path_key(src_resolved.parent) not in allowed_roots:
         logger.warning(
-            "[ACE-Step 1.5] Refusing to delete original checkpoint '%s' because it is outside '%s'.",
+            "[ACE-Step 1.5] Refusing to delete original checkpoint '%s' because it is outside registered ACE-Step model directories.",
             src_resolved,
-            models_root,
         )
         return False
 
@@ -945,14 +1129,15 @@ def resolve_or_download_model_dir(
 ) -> Tuple[Path, bool]:
     """Resolve a local cached INT8 checkpoint BEFORE ever touching or downloading the original model.
 
-    Resolution order:
+    Searches all configured ACE-Step directories (prioritizing ``extra_model_paths.yaml``):
     1. If ``model_name`` directly points to a valid INT8 quantized directory (e.g. ``*_int8_convrot``),
        auto-detect and return ``(requested_dir, True)`` regardless of ``precision`` (never downloads).
-    2. If ``precision == "int8_dynamic"`` and ``overwrite_quantized`` is False, check the sibling
-       quantized directory ``<requested_dir><save_suffix>`` FIRST. If it exists and is valid,
-       return ``(candidate_qdir, True)`` immediately without looking up or downloading the original model.
-    3. Otherwise, ensure the base checkpoint is available locally (or download via ``auto_download``)
-       and return ``(source_dir, is_quantized_checkpoint_dir(source_dir))``.
+    2. If ``precision == "int8_dynamic"`` and ``overwrite_quantized`` is False, check for
+       ``<model_name><save_suffix>`` across all registered ACE-Step directories FIRST. If it exists
+       and is valid, return ``(candidate_qdir, True)`` immediately without downloading the original.
+    3. Otherwise, ensure the base checkpoint is available locally (or download into the primary
+       ``extra_model_paths.yaml`` directory via ``auto_download``) and return
+       ``(source_dir, is_quantized_checkpoint_dir(source_dir))``.
     """
     requested_dir = resolve_checkpoint_path(model_name)
 
@@ -974,16 +1159,27 @@ def resolve_or_download_model_dir(
             )
         return requested_dir, True
 
-    # 2. Cache-first lookup for sibling quantized directory BEFORE downloading original model
+    # 2. Cache-first lookup for sibling quantized directory across ALL search dirs BEFORE downloading original
     if precision == "int8_dynamic" and not overwrite_quantized:
-        candidate_qdir = get_quantized_save_dir(requested_dir, save_suffix)
-        if is_quantized_checkpoint_dir(candidate_qdir):
-            logger.info(
-                "[ACE-Step 1.5] Reusing cached INT8 %s checkpoint '%s' (skipping original model lookup/download).",
-                category,
-                candidate_qdir.name,
-            )
-            return candidate_qdir, True
+        candidates: List[Path] = []
+        raw_candidate = Path(model_name).expanduser()
+        if raw_candidate.is_absolute():
+            candidates.append(get_quantized_save_dir(raw_candidate, save_suffix))
+        else:
+            for root in get_acestep_search_dirs():
+                candidates.append(get_quantized_save_dir(root / model_name, save_suffix))
+            sibling = get_quantized_save_dir(requested_dir, save_suffix)
+            if sibling not in candidates:
+                candidates.append(sibling)
+
+        for candidate_qdir in candidates:
+            if is_quantized_checkpoint_dir(candidate_qdir):
+                logger.info(
+                    "[ACE-Step 1.5] Reusing cached INT8 %s checkpoint '%s' (skipping original model lookup/download).",
+                    category,
+                    candidate_qdir,
+                )
+                return candidate_qdir, True
 
     # 3. No usable cached INT8 checkpoint (or full precision / explicit overwrite requested)
     source_dir = ensure_component_available(model_name, category=category, auto_download=auto_download)
@@ -1363,9 +1559,11 @@ class AceStepLMHandle:
         else:
             # Initialize via official LLMHandler.initialize() with backend="pt"
             init_device = "cpu" if self.device_mode == "cpu" else str(exec_device)
+            effective_ckpt_dir = load_dir.parent if load_dir.is_dir() else self.checkpoint_dir
+            lm_model_arg = load_dir.name if load_dir.is_dir() else str(load_dir)
             status, ok = llm_handler.initialize(
-                checkpoint_dir=str(self.checkpoint_dir),
-                lm_model_path=load_dir.name if load_dir.parent == self.checkpoint_dir else str(load_dir),
+                checkpoint_dir=str(effective_ckpt_dir),
+                lm_model_path=lm_model_arg,
                 backend="pt",
                 device=init_device if effective_precision != "int8_dynamic" else "cpu",
                 offload_to_cpu=(self.device_mode == "auto_offload"),
@@ -1382,7 +1580,11 @@ class AceStepLMHandle:
                     prefer_torchao=True,
                 )
                 if self.save_quantized:
-                    out_dir = get_quantized_save_dir(source_dir, self.save_suffix)
+                    out_dir = get_quantized_save_dir(
+                        source_dir,
+                        self.save_suffix,
+                        target_root=get_acestep_models_dir(create=True),
+                    )
                     save_quantized_safetensors_checkpoint(
                         llm_handler.llm,
                         source_dir=source_dir,
@@ -1610,7 +1812,11 @@ class AceStepDiTHandle:
                     prefer_torchao=True,
                 )
                 if self.save_quantized:
-                    out_dir = get_quantized_save_dir(source_dir, self.save_suffix)
+                    out_dir = get_quantized_save_dir(
+                        source_dir,
+                        self.save_suffix,
+                        target_root=get_acestep_models_dir(create=True),
+                    )
                     save_quantized_safetensors_checkpoint(
                         model,
                         source_dir=source_dir,
