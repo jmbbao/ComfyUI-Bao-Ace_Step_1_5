@@ -79,10 +79,10 @@ It will also work with Python 3.13, in addition to 3.12.
 
 In `pyproject.toml`, look for the actual package name; it appears after `[project]`.
 You will see the following:
-
+```bash
 [project]
 name = "ace-step"
-
+```
 Once installed, the actual name will be: ace-step (we will use this when uninstalling).
 
 We install it using pip, without including any of its dependencies, to ensure that no other packages are altered:
