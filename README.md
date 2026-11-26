@@ -30,7 +30,7 @@ Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to 
 
 I will use the /ComfyUI folder, if your ComfyUI folder is named differently pay attention to change it in the orders below.
 
-1. Dowload the nodes ComfyUI-Bao-Ace_Step_1_5
+### 1. Dowload ComfyUI-Bao-Ace_Step_1_5
 
 Open a terminal in /ComfyUI/custom_nodes:
 ```bash
@@ -40,7 +40,7 @@ git clone https://github.com/jmbbao/ComfyUI-Bao-Ace_Step_1_5.git
 The folder /ComfyUI/custom_nodes/ComfyUI-Bao-Ace_Step_1_5 will be created.
 
 
-2. Install dependencies into ComfyUI's Python environment:
+### 2. Install dependencies into ComfyUI's Python environment:
 
 For Linux with venv environment: 
 (for windows or a different environment, ask some AI to convert these orders to the ones you need, it will ask you to know if you uses uv environment, etc)
@@ -53,7 +53,8 @@ deactivate
 ```
 
 
-3. I have disabled one of the entries in requirements.txt because it could change things in the system and it is better to install it manually and also because you have to make a change if you have Python 3.13 because by default it only allows Python 3.12
+### 3. Manual install of ace-step 
+I have disabled one of the entries in requirements.txt because it could change things in the system and it is better to install it manually and also because you have to make a change if you have Python 3.13 because by default it only allows Python 3.12
 
 The package appears like this in requirements.txt: (it's a comment for that initial #, it hasn't been installed)
 ```bash
@@ -103,7 +104,8 @@ You can check if something is installed with:
 pip show ace-step
 
 
-4. If you are using `extra_model_paths.yaml` to point to a `/models` folder other than `/ComfyUI/models`, the models will be downloaded to the `acestep` folder that you specify in `extra_model_paths.yaml`—make sure to include it.
+### 4. Using a different /models folder
+If you are using `extra_model_paths.yaml` to point to a `/models` folder other than `/ComfyUI/models`, the models will be downloaded to the `acestep` folder that you specify in `extra_model_paths.yaml`—make sure to include it.
 
 Example `extra_model_paths.yaml` entry:
 ```yaml
