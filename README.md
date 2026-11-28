@@ -25,6 +25,8 @@ Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to 
 
 ## Installation
 
+(Read step 5) below to know how to fix the problem that exists in Comfy, where some pip packets install an old version of some packet and then another node doesn't work because the version of some packet changed)
+
 I will use the /ComfyUI folder, if your ComfyUI folder is named differently pay attention to change it in the orders below.
 
 ### 1. Dowload ComfyUI-Bao-Ace_Step_1_5
@@ -120,6 +122,40 @@ shared_models:
   acestep: acestep
   ...
 ```
+
+### 5. Fixing the downgrading of pip packets
+
+This node uses some pip packets in old versions,so I recommend to create a launcher that you call:
+
+AceStep_ON.sh  (ask any AI to convert these linux scripts to windows .bat files)
+
+that has these orders:
+
+```bash
+#!/bin/bash
+source venv/bin/activate
+
+# ace-step needs these versions:
+pip install huggingface_hub==0.36.2
+pip install tokenizers==0.22.2
+pip install diffusers==0.39.0
+pip install transformers==4.57.6
+
+deactivate
+```
+So before opening ComfyUI you launch this script and it install these exact versions it needs. 
+Then when you finished, close ComfyUI terminal and you run this otherlauncher to upgrade all these packets to the last version:
+
+```bash
+#!/bin/bash
+source venv/bin/activate
+
+pip install -U huggingface_hub tokenizers diffusers transformers
+
+deactivate
+```
+You can do this to be able to run any node that needs some old version of a pip packet but you then want them upgraded to last version for using other nodes.
+
 
 With `auto_download=True` (default), official Hugging Face checkpoints (`ACE-Step/Ace-Step1.5` and sub-models) are fetched automatically into that folder on first use.
 
