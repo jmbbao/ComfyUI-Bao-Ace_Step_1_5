@@ -33,3 +33,10 @@ loguru>=0.7.3
 # See readme for this change
 # torchao>=0.9.0,<0.18.0
 torchao>=0.9.0
+
+# When I ran it it told me DCW (Differential Correction in Wavelet domain) is enabled
+# is enabled but pytorch_wavelets is not installed.
+# Install with pip install pytorch_wavelets PyWavelets
+# so we install it:
+pytorch_wavelets 
+PyWavelets

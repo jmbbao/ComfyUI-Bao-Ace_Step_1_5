@@ -207,7 +207,6 @@
         "acestep-v15-xl-base",
         "int8_dynamic",
         false,
-        "_int8_convrot",
         true,
         1.5,
         true,
@@ -460,7 +459,7 @@
         40
       ]
     },
-    "workflow_title": "ACE-Step 1.5 \u2014 06 Vocal2BGM Accompaniment (12GB VRAM)",
+    "workflow_title": "ACE-Step 1.5 — 06 Vocal2BGM Accompaniment (12GB VRAM)",
     "package": "ComfyUI-Bao-Ace_Step_1_5"
   },
   "version": 0.4

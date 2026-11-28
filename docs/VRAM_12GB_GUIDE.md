@@ -22,7 +22,7 @@ Because loaders only return lazy handles and every execution node enforces `unlo
 
 1. **Always keep `unload_after_run=True`:** Every LM, Sampler, VAE, and Analysis node frees GPU tensors and runs `gc.collect()`, `torch.cuda.empty_cache()`, and `comfy.model_management.soft_empty_cache()` inside a `try ... finally` block.
 2. **Use `precision="int8_dynamic"` + disk caching (`save_quantized=True`):**
-   - On your first run, enable `save_quantized=True` with `save_suffix="_int8_convrot"` on `AceStepDiTLoader` and `AceStepLMLoader`.
+   - On your first run, enable `save_quantized=True` on `AceStepDiTLoader` and `AceStepLMLoader` (quantized folders automatically use the `_int8_convrot` suffix).
    - Only decoder `nn.Linear` layers are quantized (strictly excluding FSQ `tokenizer`, `detokenizer`, embeddings, and `lm_head` to preserve audio quality).
    - Quantized weights (`int8` + per-channel `float32` scales) are saved to `<acestep_models_dir>/<model_name>_int8_convrot/model_int8.safetensors` (using your `extra_model_paths.yaml` `acestep` folder when configured, or `ComfyUI/models/acestep/` by default) alongside `quant_meta.json`, `config.json`, `silence_latent.pt` (for DiT) or tokenizer files (for LM), and model code scripts.
    - **Keep only `*_int8_convrot` to save disk space:** Both loaders resolve the cached `*_int8_convrot` folder **before** checking or downloading the original checkpoint. You can safely delete the original full-precision folder manually (or enable `delete_original_after_quantize=True`, which verifies export completeness before deleting) and keep `auto_download=True` without ever re-downloading the original model.

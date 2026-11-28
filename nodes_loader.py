@@ -20,14 +20,19 @@ from .memory_utils import (
     ensure_component_available,
     ensure_text_encoder_available,
     get_acestep_models_dir,
+    get_compute_device,
     is_quantized_checkpoint_dir,
     list_checkpoint_choices,
     purge_vram,
     resolve_or_download_model_dir,
+    resolve_torch_dtype,
     safe_delete_original_checkpoint,
 )
 
 logger = logging.getLogger("ComfyUI-Bao-Ace_Step_1_5")
+
+# Fixed internal suffix for saved/cached INT8 quantized checkpoints (not exposed in UI).
+INTERNAL_QUANT_SAVE_SUFFIX = "_int8_convrot"
 
 
 class AceStepLMLoader:
@@ -82,19 +87,8 @@ class AceStepLMLoader:
                         "default": False,
                         "tooltip": (
                             "When precision is 'int8_dynamic', export quantized INT8 weights "
-                            "and per-channel scales to a sibling .safetensors folder for instant "
-                            "reloading on future runs."
-                        ),
-                    },
-                ),
-                "save_suffix": (
-                    "STRING",
-                    {
-                        "default": "_int8_convrot",
-                        "multiline": False,
-                        "tooltip": (
-                            "Directory suffix appended to the base checkpoint name when saving "
-                            "or discovering cached INT8 checkpoints (e.g. acestep-5Hz-lm-4B_int8_convrot)."
+                            "and per-channel scales to a sibling '*_int8_convrot' .safetensors "
+                            "folder for instant reloading on future runs."
                         ),
                     },
                 ),
@@ -115,8 +109,8 @@ class AceStepLMLoader:
                     {
                         "default": False,
                         "tooltip": (
-                            "If False (default), existing quantized folders matching save_suffix "
-                            "are loaded directly without re-quantizing or re-downloading the original model."
+                            "If False (default), an existing '*_int8_convrot' quantized folder "
+                            "is loaded directly without re-quantizing or re-downloading the original model."
                         ),
                     },
                 ),
@@ -140,7 +134,6 @@ class AceStepLMLoader:
         device: str,
         precision: str,
         save_quantized: bool,
-        save_suffix: str,
         auto_download: bool,
         overwrite_quantized: bool = False,
         delete_original_after_quantize: bool = False,
@@ -153,7 +146,7 @@ class AceStepLMLoader:
             model_path,
             category="lm",
             precision=precision,
-            save_suffix=save_suffix,
+            save_suffix=INTERNAL_QUANT_SAVE_SUFFIX,
             overwrite_quantized=overwrite_quantized,
             auto_download=auto_download,
         )
@@ -166,7 +159,7 @@ class AceStepLMLoader:
             device_mode=device,
             precision=effective_precision,
             save_quantized=save_quantized,
-            save_suffix=save_suffix,
+            save_suffix=INTERNAL_QUANT_SAVE_SUFFIX,
             overwrite_quantized=overwrite_quantized if not is_cached_int8 else False,
             delete_original_after_quantize=delete_original_after_quantize,
             auto_download=auto_download,
@@ -181,6 +174,8 @@ class AceStepLMLoader:
         ):
             logger.info("[ACE-Step 1.5] Pre-quantizing LM '%s' and saving to disk...", model_path)
             saved_device_mode = handle.device_mode
+            target_runtime_dev = get_compute_device("cpu" if saved_device_mode == "cpu" else "cuda")
+            handle._export_compute_dtype = resolve_torch_dtype(effective_precision, target_runtime_dev)
             handle.device_mode = "cpu"
             handle._defer_original_delete = True
             try:
@@ -188,6 +183,7 @@ class AceStepLMLoader:
             finally:
                 handle.unload(release_reference=True)
                 handle.device_mode = saved_device_mode
+                handle._export_compute_dtype = None
                 handle._defer_original_delete = False
                 purge_vram(aggressive=True)
 
@@ -247,20 +243,8 @@ class AceStepDiTLoader:
                         "default": False,
                         "tooltip": (
                             "When precision is 'int8_dynamic', save quantized INT8 weights and "
-                            "scales into a sibling .safetensors directory alongside config.json "
-                            "and silence_latent.pt."
-                        ),
-                    },
-                ),
-                "save_suffix": (
-                    "STRING",
-                    {
-                        "default": "_int8_convrot",
-                        "multiline": False,
-                        "tooltip": (
-                            "Suffix appended to the base model name for cached INT8 checkpoints "
-                            "(e.g. acestep-v15-xl-sft_int8_convrot). Existing folders with this "
-                            "suffix are loaded directly without re-quantizing."
+                            "scales into a sibling '*_int8_convrot' .safetensors directory alongside "
+                            "config.json and silence_latent.pt."
                         ),
                     },
                 ),
@@ -316,7 +300,7 @@ class AceStepDiTLoader:
                     {
                         "default": False,
                         "tooltip": (
-                            "If False (default), an existing quantized folder matching save_suffix "
+                            "If False (default), an existing '*_int8_convrot' quantized folder "
                             "is reused directly without re-quantizing or re-downloading the original model."
                         ),
                     },
@@ -340,7 +324,6 @@ class AceStepDiTLoader:
         model_path: str,
         precision: str,
         save_quantized: bool,
-        save_suffix: str,
         offload_dit_to_cpu: bool,
         vram_offload_threshold_gb: float,
         use_flash_attention: bool,
@@ -356,7 +339,7 @@ class AceStepDiTLoader:
             model_path,
             category="dit",
             precision=precision,
-            save_suffix=save_suffix,
+            save_suffix=INTERNAL_QUANT_SAVE_SUFFIX,
             overwrite_quantized=overwrite_quantized,
             auto_download=auto_download,
         )
@@ -370,7 +353,7 @@ class AceStepDiTLoader:
             resolved_model_dir=resolved_dir,
             precision=effective_precision,
             save_quantized=save_quantized,
-            save_suffix=save_suffix,
+            save_suffix=INTERNAL_QUANT_SAVE_SUFFIX,
             overwrite_quantized=overwrite_quantized if not is_cached_int8 else False,
             delete_original_after_quantize=delete_original_after_quantize,
             offload_dit_to_cpu=offload_dit_to_cpu,

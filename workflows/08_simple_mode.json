@@ -35,7 +35,6 @@
         "auto_offload",
         "int8_dynamic",
         false,
-        "_int8_convrot",
         true,
         false,
         false
@@ -165,7 +164,6 @@
         "acestep-v15-xl-sft",
         "int8_dynamic",
         false,
-        "_int8_convrot",
         true,
         1.5,
         true,
@@ -475,7 +473,7 @@
         40
       ]
     },
-    "workflow_title": "ACE-Step 1.5 \u2014 08 Simple Mode (XL 4B + LM 4B, 12GB VRAM)",
+    "workflow_title": "ACE-Step 1.5 — 08 Simple Mode (XL 4B + LM 4B, 12GB VRAM)",
     "package": "ComfyUI-Bao-Ace_Step_1_5"
   },
   "version": 0.4

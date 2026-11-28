@@ -42,8 +42,11 @@ except ImportError:  # pragma: no cover
 from .memory_utils import (
     AceStepDiTHandle,
     DiTBlockOffloadManager,
+    align_module_dtypes,
     get_compute_device,
     get_free_vram_gb,
+    install_fsq_dtype_guard,
+    install_handler_safe_transfer,
     move_module_to_device_safe,
     purge_vram,
     resolve_torch_dtype,
@@ -519,6 +522,9 @@ class AceStepSampler:
             active_handler = handler
             exec_device = get_compute_device("cuda")
             compute_dtype = resolve_torch_dtype(dit_model.precision, exec_device)
+            handler.dtype = compute_dtype
+            install_handler_safe_transfer(handler)
+            align_module_dtypes(handler.model, compute_dtype)
             if pbar is not None:
                 pbar.update(1)
 
@@ -661,8 +667,10 @@ class AceStepSampler:
 
                         handler._load_model_context = _block_offload_aware_context
                         handler.silence_latent = handler.silence_latent.to(exec_device, dtype=compute_dtype)
+                        install_fsq_dtype_guard(handler.model, compute_dtype)
                 else:
                     handler.offload_dit_to_cpu = dit_model.offload_dit_to_cpu
+                    install_fsq_dtype_guard(handler.model, compute_dtype)
 
             logger.info(
                 "[ACE-Step 1.5] Sampling DiT '%s' (task=%s, precision=%s, steps=%d, cfg=%.1f, "

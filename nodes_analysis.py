@@ -24,6 +24,8 @@ from .memory_utils import (
     AceStepDiTHandle,
     AceStepLMHandle,
     get_compute_device,
+    install_fsq_dtype_guard,
+    install_handler_safe_transfer,
     move_module_to_device_safe,
     purge_vram,
     resolve_torch_dtype,
@@ -49,6 +51,9 @@ def _extract_codes_with_dit_handler(handler: Any, latents_btc: torch.Tensor) -> 
 
     hidden_states = latents_btc[:1].to(device=exec_device, dtype=compute_dtype)
     attention_mask = torch.ones((1, hidden_states.shape[1]), dtype=torch.bool, device=exec_device)
+
+    install_handler_safe_transfer(handler)
+    install_fsq_dtype_guard(handler.model, compute_dtype)
 
     with torch.inference_mode():
         with handler._load_model_context("model"):
@@ -385,12 +390,14 @@ class AceStepLRCGenerator:
 
         try:
             handler = dit_model.ensure_loaded()
+            install_handler_safe_transfer(handler)
+            compute_dtype = handler.dtype
             logger.info("[ACE-Step 1.5] Running DiT cross-attention LRC alignment (duration=%.2fs)...", total_duration)
             result = handler.get_lyric_timestamp(
-                pred_latent=pred_latent,
-                encoder_hidden_states=alignment["encoder_hidden_states"][:1],
+                pred_latent=pred_latent.to(dtype=compute_dtype),
+                encoder_hidden_states=alignment["encoder_hidden_states"][:1].to(dtype=compute_dtype),
                 encoder_attention_mask=alignment["encoder_attention_mask"][:1],
-                context_latents=alignment["context_latents"][:1],
+                context_latents=alignment["context_latents"][:1].to(dtype=compute_dtype),
                 lyric_token_ids=alignment["lyric_token_ids"][:1],
                 total_duration_seconds=total_duration,
                 vocal_language=vocal_language,
@@ -592,13 +599,15 @@ class AceStepQualityScorer:
         if needs_dit and dit_model is not None:
             try:
                 handler = dit_model.ensure_loaded()
+                install_handler_safe_transfer(handler)
+                compute_dtype = handler.dtype
                 if run_dit_lyric_score and isinstance(alignment, dict) and alignment.get("encoder_hidden_states") is not None:
                     logger.info("[ACE-Step 1.5] Computing DiT lyric alignment score...")
                     score_res = handler.get_lyric_score(
-                        pred_latent=pred_latent,
-                        encoder_hidden_states=alignment["encoder_hidden_states"][:1],
+                        pred_latent=pred_latent.to(dtype=compute_dtype),
+                        encoder_hidden_states=alignment["encoder_hidden_states"][:1].to(dtype=compute_dtype),
                         encoder_attention_mask=alignment["encoder_attention_mask"][:1],
-                        context_latents=alignment["context_latents"][:1],
+                        context_latents=alignment["context_latents"][:1].to(dtype=compute_dtype),
                         lyric_token_ids=alignment["lyric_token_ids"][:1],
                         vocal_language=str(meta.get("vocal_language", "en") or "en"),
                         inference_steps=int(inference_steps),

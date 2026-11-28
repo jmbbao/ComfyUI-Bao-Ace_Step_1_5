@@ -26,7 +26,7 @@ Modular, VRAM-isolated **ACE-Step 1.5** custom nodes for ComfyUI, engineered to 
   - **LRC Generation** with DTW cross-attention alignment and optional `.lrc` file export (`AceStepLRCGenerator`)
   - **Quality Scoring** combining DiT lyric alignment + sequential 5Hz LM PMI/reward scoring (`AceStepQualityScorer`)
 
-## INSTALLATION
+## Installation
 
 I will use the /ComfyUI folder, if your ComfyUI folder is named differently pay attention to change it in the orders below.
 
@@ -160,4 +160,88 @@ Drag and drop any `.json` file from `workflows/` directly into ComfyUI:
 10. `workflows/10_audio_understanding.json` — Reverse-engineer caption, lyrics, and metadata from audio
 11. `workflows/11_lrc_generation.json` — Generate music + aligned `.lrc` timestamps
 12. `workflows/12_quality_scoring.json` — Generate music + sequential DiT alignment & LM PMI scoring
+
+---
+
+## LINKS TO THE MODELS
+
+The models are downloaded on first use. This section is included so you know the repositories being used.
+
+> Verified against actual Hugging Face `.safetensors` shard headers. Brackets show the **real on-disk weight dtype** first, followed by supported runtime/cached modes (`bf16`, `fp16`, `fp32`, `int8_convrot`). For LM and DiT models, enabling `precision="int8_dynamic"` with `save_quantized=True` creates the local `int8_convrot` folder with the `_int8_convrot` suffix.
+
+
+### 1) VAE Models (`AceStepVAELoader`)
+
+#### `vae` [bf16 on disk | runtime: fp16 / bf16 / fp32]
+https://huggingface.co/ACE-Step/Ace-Step1.5/tree/main/vae  
+`models/acestep/vae/`
+
+#### `scragvae` [fp32 on disk | runtime: fp16 / bf16 / fp32]
+> **Note:** The repo also hosts a BF16 GGUF variant (`scragvae-BF16.gguf`) and `config.json` does not declare a dtype, but the actual `diffusion_pytorch_model.safetensors` weights downloaded by this loader are **FP32 (`torch.float32`, 365 tensors)** and are cast cleanly to your selected precision at runtime.  
+https://huggingface.co/scragnog/Ace-Step-1.5-ScragVAE  
+`models/acestep/scragvae/`
+
+
+### 2) LM (Language Model) 5Hz (`AceStepLMLoader`)
+
+#### `acestep-5Hz-lm-0.6B` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/acestep-5Hz-lm-0.6B  
+`models/acestep/acestep-5Hz-lm-0.6B/` (`models/acestep/acestep-5Hz-lm-0.6B_int8_convrot/`)
+
+#### `acestep-5Hz-lm-1.7B` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/Ace-Step1.5/tree/main/acestep-5Hz-lm-1.7B  
+`models/acestep/acestep-5Hz-lm-1.7B/` (`models/acestep/acestep-5Hz-lm-1.7B_int8_convrot/`)
+
+#### `acestep-5Hz-lm-4B` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/acestep-5Hz-lm-4B  
+`models/acestep/acestep-5Hz-lm-4B/` (`models/acestep/acestep-5Hz-lm-4B_int8_convrot/`)
+
+
+### 3) DiT (Diffusion Transformer) Models (`AceStepDiTLoader`)
+
+#### `acestep-v15-turbo` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/Ace-Step1.5/tree/main/acestep-v15-turbo  
+`models/acestep/acestep-v15-turbo/` (`models/acestep/acestep-v15-turbo_int8_convrot/`)
+
+#### `acestep-v15-sft` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/acestep-v15-sft  
+`models/acestep/acestep-v15-sft/` (`models/acestep/acestep-v15-sft_int8_convrot/`)
+
+#### `acestep-v15-base` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/acestep-v15-base  
+`models/acestep/acestep-v15-base/` (`models/acestep/acestep-v15-base_int8_convrot/`)
+
+#### `acestep-v15-turbo-shift3` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/acestep-v15-turbo-shift3  
+`models/acestep/acestep-v15-turbo-shift3/` (`models/acestep/acestep-v15-turbo-shift3_int8_convrot/`)
+
+#### `acestep-v15-turbo-shift1` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/acestep-v15-turbo-shift1  
+`models/acestep/acestep-v15-turbo-shift1/` (`models/acestep/acestep-v15-turbo-shift1_int8_convrot/`)
+
+#### `acestep-v15-turbo-continuous` [bf16 on disk | runtime: bf16 / fp16 / int8_convrot]
+https://huggingface.co/ACE-Step/acestep-v15-turbo-continuous  
+`models/acestep/acestep-v15-turbo-continuous/` (`models/acestep/acestep-v15-turbo-continuous_int8_convrot/`)
+
+#### `acestep-v15-xl-base` [fp32 on disk | runtime: bf16 / fp16 / int8_convrot]
+> **Note:** `config.json` declares `"dtype": "bfloat16"`, but all 4 `.safetensors` shards on Hugging Face actually store **FP32 (`torch.float32`, 829 tensors, ~20 GB)** weights; the loader coherently casts them to your target dtype (`bf16`/`fp16`/`int8_convrot`) while keeping FSQ/RoPE buffers in FP32.  
+https://huggingface.co/ACE-Step/acestep-v15-xl-base  
+`models/acestep/acestep-v15-xl-base/` (`models/acestep/acestep-v15-xl-base_int8_convrot/`)
+
+#### `acestep-v15-xl-sft` [fp32 on disk | runtime: bf16 / fp16 / int8_convrot]
+> **Note:** `config.json` declares `"dtype": "bfloat16"`, but all 4 `.safetensors` shards on Hugging Face actually store **FP32 (`torch.float32`, 829 tensors, ~20 GB)** weights; the loader coherently casts them to your target dtype (`bf16`/`fp16`/`int8_convrot`) while keeping FSQ/RoPE buffers in FP32.  
+https://huggingface.co/ACE-Step/acestep-v15-xl-sft  
+`models/acestep/acestep-v15-xl-sft/` (`models/acestep/acestep-v15-xl-sft_int8_convrot/`)
+
+#### `acestep-v15-xl-turbo` [fp32 on disk | runtime: bf16 / fp16 / int8_convrot]
+> **Note:** `config.json` declares `"dtype": "bfloat16"`, but all 4 `.safetensors` shards on Hugging Face actually store **FP32 (`torch.float32`, 829 tensors, ~20 GB)** weights; the loader coherently casts them to your target dtype (`bf16`/`fp16`/`int8_convrot`) while keeping FSQ/RoPE buffers in FP32 with automatic boundary casting.  
+https://huggingface.co/ACE-Step/acestep-v15-xl-turbo  
+`models/acestep/acestep-v15-xl-turbo/` (`models/acestep/acestep-v15-xl-turbo_int8_convrot/`)
+
+### Text Encoder (Auto-loaded by `AceStepDiTLoader`)
+
+#### `Qwen3-Embedding-0.6B` [bf16 on disk | runtime: bf16 / fp16 / fp32]
+https://huggingface.co/ACE-Step/Ace-Step1.5/tree/main/Qwen3-Embedding-0.6B  
+`models/acestep/Qwen3-Embedding-0.6B/`
+
 

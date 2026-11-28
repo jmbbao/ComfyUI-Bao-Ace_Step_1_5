@@ -158,7 +158,6 @@
         "auto",
         "int8_dynamic",
         false,
-        "_int8_convrot",
         true,
         1.5,
         true,
@@ -249,7 +248,6 @@
         "auto_offload",
         "int8_dynamic",
         false,
-        "_int8_convrot",
         true,
         false,
         false
@@ -380,7 +378,7 @@
         40
       ]
     },
-    "workflow_title": "ACE-Step 1.5 \u2014 10 Audio Understanding (12GB VRAM)",
+    "workflow_title": "ACE-Step 1.5 — 10 Audio Understanding (12GB VRAM)",
     "package": "ComfyUI-Bao-Ace_Step_1_5"
   },
   "version": 0.4

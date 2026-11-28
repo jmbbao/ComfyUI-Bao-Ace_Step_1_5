@@ -12,6 +12,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import math
 import os
 import shutil
 import sys
@@ -583,27 +584,264 @@ def _is_quantized_subclass(tensor: torch.Tensor) -> bool:
     return type(tensor) is not torch.Tensor and type(tensor) is not nn.Parameter
 
 
+_FP32_PRECISION_BUFFER_NAMES = frozenset(
+    {
+        "weight_scale",
+        "inv_freq",
+        "implicit_codebook",
+        "scales",
+        "orthogonal_rot",
+    }
+)
+
+
+def _is_fsq_module(mod: nn.Module) -> bool:
+    """Return True if ``mod`` is a ResidualFSQ / GroupedResidualFSQ / FSQ module."""
+    cls_name = mod.__class__.__name__.lower()
+    return (
+        "fsq" in cls_name
+        or (hasattr(mod, "get_output_from_indices") and hasattr(mod, "get_codes_from_indices"))
+        or (hasattr(mod, "_levels") and hasattr(mod, "_basis"))
+    )
+
+
+def _is_precision_sensitive_fp32_buffer(mod: nn.Module, buffer_name: str) -> bool:
+    """Return True for floating-point buffers that must remain FP32 for numerical integrity.
+
+    Preserves:
+    - ``Int8DynamicLinear.weight_scale`` (per-channel dequantization scales)
+    - RoPE ``inv_freq`` buffers (rotary positional embedding frequencies)
+    - ResidualFSQ / FSQ codebook & scale buffers (``implicit_codebook``, ``scales``, ``orthogonal_rot``)
+    """
+    if buffer_name in _FP32_PRECISION_BUFFER_NAMES:
+        return True
+    cls_name = mod.__class__.__name__.lower()
+    if "rotary" in cls_name and "freq" in buffer_name:
+        return True
+    if _is_fsq_module(mod) and buffer_name in ("codebooks", "implicit_codebook", "scales", "orthogonal_rot"):
+        return True
+    return False
+
+
+def _enforce_fsq_fp32_buffers(quantizer: nn.Module) -> None:
+    """Keep precision-sensitive floating buffers inside ``ResidualFSQ``/``FSQ`` in FP32."""
+    for sub in quantizer.modules():
+        for bname, buf in list(sub._buffers.items()):
+            if buf is None or not buf.is_floating_point():
+                continue
+            if _is_precision_sensitive_fp32_buffer(sub, bname) and buf.dtype != torch.float32:
+                sub._buffers[bname] = buf.to(dtype=torch.float32)
+
+
+def _install_linear_input_dtype_hook(mod: Optional[nn.Module]) -> None:
+    """Attach an idempotent pre-hook casting floating inputs to match a projection's weight dtype."""
+    if mod is None or isinstance(mod, nn.Identity):
+        return
+    if getattr(mod, "_acestep_dtype_prehook_installed", False):
+        return
+    weight = getattr(mod, "weight", None)
+    if not isinstance(weight, torch.Tensor) or not weight.is_floating_point():
+        return
+
+    def _align_input_pre_hook(m: nn.Module, args: Tuple[Any, ...]):
+        if not args:
+            return args
+        x = args[0]
+        w = getattr(m, "weight", None)
+        if (
+            isinstance(x, torch.Tensor)
+            and x.is_floating_point()
+            and isinstance(w, torch.Tensor)
+            and w.is_floating_point()
+            and x.dtype != w.dtype
+        ):
+            return (x.to(dtype=w.dtype),) + args[1:]
+        return args
+
+    mod.register_forward_pre_hook(_align_input_pre_hook)
+    setattr(mod, "_acestep_dtype_prehook_installed", True)
+
+
+def install_fsq_dtype_guard(
+    model: Optional[nn.Module],
+    compute_dtype: Optional[torch.dtype] = None,
+) -> None:
+    """Install idempotent dtype guards on ResidualFSQ/FSQ quantizers inside an ACE-Step DiT model.
+
+    Keeps FSQ lookup buffers (``implicit_codebook``, ``scales``) in FP32 for exact codebook math
+    while automatically aligning tensor dtypes at the ``project_in``, ``project_out``,
+    ``get_output_from_indices``, and ``forward`` boundaries. This eliminates
+    ``RuntimeError: mat1 and mat2 must have the same dtype, but got Float and BFloat16``
+    across all 2B and XL DiT models in ``bf16``, ``fp16``, and ``int8_convrot`` modes.
+    """
+    if model is None:
+        return
+
+    quantizers: List[nn.Module] = []
+    tokenizer = getattr(model, "tokenizer", None)
+    if tokenizer is not None and getattr(tokenizer, "quantizer", None) is not None:
+        quantizers.append(tokenizer.quantizer)
+
+    for sub in model.modules():
+        if _is_fsq_module(sub) and sub not in quantizers:
+            quantizers.append(sub)
+
+    for quantizer in quantizers:
+        if compute_dtype is not None:
+            setattr(quantizer, "_acestep_target_dtype", compute_dtype)
+
+        # Keep FSQ codebook/scale buffers in FP32
+        _enforce_fsq_fp32_buffers(quantizer)
+
+        # Protect every project_in / project_out linear layer inside ResidualFSQ & child FSQ layers
+        for sub in quantizer.modules():
+            _install_linear_input_dtype_hook(getattr(sub, "project_in", None))
+            _install_linear_input_dtype_hook(getattr(sub, "project_out", None))
+
+        if getattr(quantizer, "_acestep_fsq_dtype_guarded", False):
+            continue
+
+        # Wrap get_output_from_indices (called by _decode_audio_codes_to_latents)
+        if hasattr(quantizer, "get_output_from_indices") and callable(quantizer.get_output_from_indices):
+            orig_get_output = quantizer.get_output_from_indices
+
+            def _make_guarded_get_output(q_mod: nn.Module, orig_fn: Callable[..., Any]):
+                def _guarded_get_output_from_indices(indices: torch.Tensor, *args: Any, **kwargs: Any):
+                    _enforce_fsq_fp32_buffers(q_mod)
+                    proj_out = getattr(q_mod, "project_out", None)
+                    proj_w = getattr(proj_out, "weight", None)
+                    target_dev = proj_w.device if isinstance(proj_w, torch.Tensor) else None
+                    if target_dev is None:
+                        for p in q_mod.parameters():
+                            target_dev = p.device
+                            break
+                    if target_dev is None:
+                        for b in q_mod.buffers():
+                            target_dev = b.device
+                            break
+                    if isinstance(indices, torch.Tensor) and target_dev is not None and indices.device != target_dev:
+                        indices = indices.to(device=target_dev)
+
+                    out = orig_fn(indices, *args, **kwargs)
+                    desired_dtype = (
+                        proj_w.dtype
+                        if isinstance(proj_w, torch.Tensor) and proj_w.is_floating_point()
+                        else getattr(q_mod, "_acestep_target_dtype", None)
+                    )
+                    if (
+                        desired_dtype is not None
+                        and isinstance(out, torch.Tensor)
+                        and out.is_floating_point()
+                        and out.dtype != desired_dtype
+                    ):
+                        out = out.to(dtype=desired_dtype)
+                    return out
+
+                return _guarded_get_output_from_indices
+
+            quantizer.get_output_from_indices = _make_guarded_get_output(quantizer, orig_get_output)  # type: ignore[method-assign]
+
+        # Wrap forward() so 2B models (which lack XL's fp32 cast) and XL models (which call
+        # self.quantizer.to(quantizer_dtype) afterwards) never clash or degrade FSQ buffers.
+        orig_forward = getattr(quantizer, "forward", None)
+        if callable(orig_forward):
+            def _make_guarded_forward(q_mod: nn.Module, orig_fn: Callable[..., Any]):
+                def _guarded_forward(x: torch.Tensor, *args: Any, **kwargs: Any):
+                    _enforce_fsq_fp32_buffers(q_mod)
+                    in_dtype = x.dtype if isinstance(x, torch.Tensor) and x.is_floating_point() else None
+                    res = orig_fn(x, *args, **kwargs)
+                    _enforce_fsq_fp32_buffers(q_mod)
+                    if in_dtype is not None:
+                        if isinstance(res, tuple) and len(res) >= 1 and isinstance(res[0], torch.Tensor):
+                            if res[0].is_floating_point() and res[0].dtype != in_dtype:
+                                res = (res[0].to(dtype=in_dtype),) + res[1:]
+                        elif isinstance(res, torch.Tensor) and res.is_floating_point() and res.dtype != in_dtype:
+                            res = res.to(dtype=in_dtype)
+                    return res
+
+                return _guarded_forward
+
+            quantizer.forward = _make_guarded_forward(quantizer, orig_forward)  # type: ignore[method-assign]
+        setattr(quantizer, "_acestep_fsq_dtype_guarded", True)
+
+    # Also restore FP32 FSQ buffers after AceStepAudioTokenizer.forward() in XL models
+    # (upstream XL calls `self.quantizer.to(quantizer_dtype)` at the end of forward).
+    if tokenizer is not None and not getattr(tokenizer, "_acestep_tok_posthook_installed", False):
+        def _tokenizer_post_hook(tok_mod: nn.Module, _args: Any, output: Any):
+            q = getattr(tok_mod, "quantizer", None)
+            if q is not None:
+                _enforce_fsq_fp32_buffers(q)
+            return output
+
+        tokenizer.register_forward_hook(_tokenizer_post_hook)
+        setattr(tokenizer, "_acestep_tok_posthook_installed", True)
+
+
+def align_module_dtypes(
+    module: Optional[nn.Module],
+    compute_dtype: torch.dtype,
+) -> None:
+    """Coherently cast all non-quantized floating parameters and ordinary buffers to ``compute_dtype``
+    in-place (preserving each tensor's current device), while keeping precision-sensitive buffers
+    (``weight_scale``, RoPE ``inv_freq``, ResidualFSQ ``implicit_codebook``/``scales``) in FP32.
+    """
+    if module is None:
+        return
+
+    visited: set[int] = set()
+
+    def _recurse(mod: nn.Module) -> None:
+        mod_id = id(mod)
+        if mod_id in visited:
+            return
+        visited.add(mod_id)
+
+        if isinstance(mod, Int8DynamicLinear):
+            mod.compute_dtype = compute_dtype
+
+        for pname, param in list(mod._parameters.items()):
+            if param is None or param.device.type == "meta":
+                continue
+            if _is_quantized_subclass(param.data):
+                continue
+            if param.is_floating_point() and param.dtype != compute_dtype:
+                param.data = param.data.to(dtype=compute_dtype)
+
+        for bname, buf in list(mod._buffers.items()):
+            if buf is None or buf.device.type == "meta" or not buf.is_floating_point():
+                continue
+            target_buf_dtype = (
+                torch.float32 if _is_precision_sensitive_fp32_buffer(mod, bname) else compute_dtype
+            )
+            if buf.dtype != target_buf_dtype:
+                mod._buffers[bname] = buf.to(dtype=target_buf_dtype)
+
+        for child in mod._modules.values():
+            if child is not None:
+                _recurse(child)
+
+    _recurse(module)
+    install_fsq_dtype_guard(module, compute_dtype=compute_dtype)
+
+
 def move_module_to_device_safe(
     module: Optional[nn.Module],
     target_device: str | torch.device,
     dtype: Optional[torch.dtype] = None,
 ) -> None:
     """Safely transfer a module (including torchao quantized tensors and Int8DynamicLinear)
-    between CUDA and CPU without breaking quantized subclasses or leaving orphan buffers.
+    between CUDA and CPU with coherent dtype casting while preserving INT8 weights and
+    precision-sensitive FP32 buffers (``weight_scale``, RoPE ``inv_freq``, FSQ codebooks/scales).
     """
     if module is None:
         return
 
     dev = torch.device(target_device) if isinstance(target_device, str) else target_device
 
-    # Fast path first (works on modern PyTorch + Int8DynamicLinear)
+    # Fast path first (moves device without corrupting INT8 or FP32 precision-sensitive buffers)
     fast_failed = False
     try:
-        if dtype is not None:
-            # Avoid casting integer buffers/weights by moving device first, then floating params
-            module.to(device=dev)
-        else:
-            module.to(device=dev)
+        module.to(device=dev)
     except NotImplementedError:
         fast_failed = True
 
@@ -614,6 +852,9 @@ def move_module_to_device_safe(
         if mod_id in visited:
             return
         visited.add(mod_id)
+
+        if dtype is not None and isinstance(mod, Int8DynamicLinear):
+            mod.compute_dtype = dtype
 
         for pname, param in list(mod._parameters.items()):
             if param is None:
@@ -631,7 +872,6 @@ def move_module_to_device_safe(
                     dtype is not None
                     and param.is_floating_point()
                     and param.dtype != dtype
-                    and not isinstance(mod, Int8DynamicLinear)
                 )
                 if needs_move or needs_cast:
                     new_data = param.data.to(device=dev, dtype=dtype if needs_cast else param.dtype)
@@ -640,8 +880,14 @@ def move_module_to_device_safe(
         for bname, buf in list(mod._buffers.items()):
             if buf is None:
                 continue
-            if buf.device != dev:
-                mod._buffers[bname] = buf.to(dev)
+            if dtype is not None and buf.is_floating_point():
+                target_buf_dtype = (
+                    torch.float32 if _is_precision_sensitive_fp32_buffer(mod, bname) else dtype
+                )
+            else:
+                target_buf_dtype = buf.dtype
+            if buf.device != dev or buf.dtype != target_buf_dtype:
+                mod._buffers[bname] = buf.to(device=dev, dtype=target_buf_dtype)
 
         for child in mod._modules.values():
             if child is not None:
@@ -650,11 +896,39 @@ def move_module_to_device_safe(
     if fast_failed or dtype is not None:
         _recurse(module)
     else:
-        # Verification sweep for quantized tensor subclasses that .to() might leave behind
+        # Verification sweep for quantized tensor subclasses or buffers that .to() might leave behind
+        needs_sweep = False
         for _, p in module.named_parameters():
             if p.device != dev:
-                _recurse(module)
+                needs_sweep = True
                 break
+        if not needs_sweep:
+            for _, b in module.named_buffers():
+                if b is not None and b.device != dev:
+                    needs_sweep = True
+                    break
+        if needs_sweep:
+            _recurse(module)
+
+    if dtype is not None:
+        install_fsq_dtype_guard(module, compute_dtype=dtype)
+
+
+def install_handler_safe_transfer(handler: Any) -> None:
+    """Bind ``handler._recursive_to_device`` to ``move_module_to_device_safe``.
+
+    Ensures both 12 GB (block offload) and >= 24 GB (full resident / handler offload) GPUs
+    never corrupt ``Int8DynamicLinear.weight_scale``, RoPE ``inv_freq``, or ResidualFSQ
+    FP32 buffers when upstream ``_load_model_context`` moves models between CPU and CUDA.
+    """
+    if handler is None or getattr(handler, "_acestep_safe_transfer_installed", False):
+        return
+
+    def _safe_recursive_to_device(model: Any, device: Any, dtype: Any = None) -> None:
+        move_module_to_device_safe(model, device, dtype)
+
+    handler._recursive_to_device = _safe_recursive_to_device
+    setattr(handler, "_acestep_safe_transfer_installed", True)
 
 
 # ==============================================================================
@@ -1243,6 +1517,91 @@ def _copy_checkpoint_sidecar_files(source_dir: Path, target_dir: Path) -> None:
             shutil.copy2(item, dst)
 
 
+def _rematerialize_meta_buffers(model: nn.Module) -> None:
+    """Reconstruct any non-persistent buffers left on ``meta`` device after ``assign=True`` load.
+
+    Rebuilds ResidualFSQ/FSQ codebook/level buffers and RoPE ``inv_freq`` accurately instead
+    of filling them with zeros, falling back to zero-init only for generic masks/caches.
+    """
+    for fqn, mod in model.named_modules():
+        meta_bufs = [
+            (bname, buf)
+            for bname, buf in list(mod._buffers.items())
+            if buf is not None and buf.device.type == "meta"
+        ]
+        if not meta_bufs:
+            continue
+
+        # 1. Reconstruct FSQ / ResidualFSQ non-persistent buffers accurately
+        if _is_fsq_module(mod):
+            levels_attr = getattr(mod, "levels", None)
+            if levels_attr is not None:
+                levels_list = [int(x) for x in levels_attr]
+                levels_t = torch.tensor(levels_list, dtype=torch.int32, device="cpu")
+                if "_levels" in mod._buffers and mod._buffers["_levels"] is not None and mod._buffers["_levels"].device.type == "meta":
+                    mod._buffers["_levels"] = levels_t
+                if "_basis" in mod._buffers and mod._buffers["_basis"] is not None and mod._buffers["_basis"].device.type == "meta":
+                    basis_dtype = mod._buffers["_basis"].dtype
+                    basis_vals = [1]
+                    for lv in levels_list[:-1]:
+                        basis_vals.append(basis_vals[-1] * lv)
+                    mod._buffers["_basis"] = torch.tensor(basis_vals, dtype=basis_dtype, device="cpu")
+                if (
+                    "implicit_codebook" in mod._buffers
+                    and mod._buffers["implicit_codebook"] is not None
+                    and mod._buffers["implicit_codebook"].device.type == "meta"
+                    and hasattr(mod, "_indices_to_codes")
+                ):
+                    try:
+                        cb_size = int(getattr(mod, "codebook_size", 0) or math.prod(levels_list))
+                        all_idx = torch.arange(cb_size, device="cpu")
+                        cb = mod._indices_to_codes(all_idx).to(dtype=torch.float32, device="cpu")
+                        mod._buffers["implicit_codebook"] = cb
+                    except Exception:
+                        pass
+
+            if "scales" in mod._buffers and mod._buffers["scales"] is not None and mod._buffers["scales"].device.type == "meta":
+                scales_shape = mod._buffers["scales"].shape
+                num_q = scales_shape[0] if len(scales_shape) >= 1 else int(getattr(mod, "num_quantizers", 1))
+                levels_ref = getattr(mod, "levels", None)
+                if levels_ref is not None and len(scales_shape) >= 2:
+                    base_lv = torch.tensor([float(x) for x in levels_ref], dtype=torch.float32, device="cpu")
+                    scales_list = [base_lv ** (-i) for i in range(num_q)]
+                    mod._buffers["scales"] = torch.stack(scales_list, dim=0).reshape(scales_shape)
+                else:
+                    mod._buffers["scales"] = torch.ones(scales_shape, dtype=torch.float32, device="cpu")
+
+        # 2. Reconstruct RotaryEmbedding inv_freq accurately
+        if "inv_freq" in mod._buffers and mod._buffers["inv_freq"] is not None and mod._buffers["inv_freq"].device.type == "meta":
+            inv_shape = mod._buffers["inv_freq"].shape
+            rebuilt = None
+            rope_init_fn = getattr(mod, "rope_init_fn", None)
+            mod_cfg = getattr(mod, "config", None)
+            if callable(rope_init_fn) and mod_cfg is not None:
+                try:
+                    inv_f, _ = rope_init_fn(mod_cfg, "cpu")
+                    if isinstance(inv_f, torch.Tensor) and inv_f.shape == inv_shape:
+                        rebuilt = inv_f.to(device="cpu", dtype=torch.float32)
+                except Exception:
+                    rebuilt = None
+            if rebuilt is None and len(inv_shape) == 1:
+                dim = int(inv_shape[0]) * 2
+                theta = float(
+                    getattr(mod, "base", None)
+                    or getattr(getattr(mod, "config", None), "rope_theta", None)
+                    or 10000.0
+                )
+                rebuilt = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float32, device="cpu") / float(dim)))
+            if rebuilt is not None:
+                mod._buffers["inv_freq"] = rebuilt
+
+        # 3. Fallback for any remaining generic meta buffer
+        for bname, buf in list(mod._buffers.items()):
+            if buf is not None and buf.device.type == "meta":
+                logger.debug("[ACE-Step 1.5] Zero-initializing remaining meta buffer '%s.%s'.", fqn, bname)
+                mod._buffers[bname] = torch.zeros(buf.shape, dtype=buf.dtype, device="cpu")
+
+
 def save_quantized_safetensors_checkpoint(
     model: nn.Module,
     source_dir: Path,
@@ -1250,14 +1609,16 @@ def save_quantized_safetensors_checkpoint(
     *,
     scope: str,
     quant_backend: str,
+    compute_dtype: Optional[torch.dtype] = None,
     overwrite: bool = False,
 ) -> Path:
     """Serialize a quantized model into ``<output_dir>/model_int8.safetensors`` + ``quant_meta.json``.
 
     Stores quantized linear weights as ``<fqn>.weight_int8`` (`int8`) and
-    ``<fqn>.weight_scale`` (`float32`), while preserving all non-quantized
-    parameters and buffers verbatim so the saved directory loads directly
-    without re-quantization.
+    ``<fqn>.weight_scale`` (`float32`), normalizes non-quantized floating parameters
+    and ordinary buffers to ``compute_dtype`` (if specified), and preserves
+    precision-sensitive buffers (RoPE ``inv_freq``, ResidualFSQ ``implicit_codebook``/``scales``)
+    in ``float32`` so the saved directory reloads cleanly without dtype clashes.
     """
     from safetensors.torch import save_file
 
@@ -1276,6 +1637,15 @@ def save_quantized_safetensors_checkpoint(
     handled_param_keys: set[str] = set()
     handled_buffer_keys: set[str] = set()
 
+    def _export_fp_tensor(t: torch.Tensor, keep_fp32: bool = False) -> torch.Tensor:
+        out = t.detach().cpu()
+        if out.is_floating_point():
+            if keep_fp32:
+                out = out.to(torch.float32)
+            elif compute_dtype is not None and out.dtype != compute_dtype:
+                out = out.to(compute_dtype)
+        return out.contiguous()
+
     # 1. Extract all quantized linear modules (Int8DynamicLinear or torchao-wrapped nn.Linear)
     for fqn, mod in model.named_modules():
         if isinstance(mod, Int8DynamicLinear):
@@ -1285,7 +1655,7 @@ def save_quantized_safetensors_checkpoint(
             handled_buffer_keys.add(f"{fqn}.weight_scale")
             has_bias = mod.bias is not None
             if has_bias and mod.bias is not None:
-                tensors[f"{fqn}.bias"] = mod.bias.detach().cpu().contiguous()
+                tensors[f"{fqn}.bias"] = _export_fp_tensor(mod.bias)
                 handled_param_keys.add(f"{fqn}.bias")
             quantized_layers[fqn] = {
                 "in_features": int(mod.in_features),
@@ -1301,7 +1671,7 @@ def save_quantized_safetensors_checkpoint(
                 handled_param_keys.add(f"{fqn}.weight")
                 has_bias = mod.bias is not None
                 if has_bias and mod.bias is not None:
-                    tensors[f"{fqn}.bias"] = mod.bias.detach().cpu().contiguous()
+                    tensors[f"{fqn}.bias"] = _export_fp_tensor(mod.bias)
                     handled_param_keys.add(f"{fqn}.bias")
                 quantized_layers[fqn] = {
                     "in_features": int(mod.in_features),
@@ -1309,7 +1679,7 @@ def save_quantized_safetensors_checkpoint(
                     "has_bias": has_bias,
                 }
 
-    # 2. Collect all remaining non-quantized parameters and persistent buffers
+    # 2. Collect all remaining non-quantized parameters and buffers
     for name, param in model.named_parameters():
         if name in handled_param_keys or param is None:
             continue
@@ -1320,12 +1690,16 @@ def save_quantized_safetensors_checkpoint(
                 tensors[f"{name}_int8"] = q_w
                 tensors[f"{name}_scale"] = scale
                 continue
-        tensors[name] = param.detach().cpu().contiguous()
+        tensors[name] = _export_fp_tensor(param)
 
-    for name, buf in model.named_buffers():
-        if name in handled_buffer_keys or buf is None:
-            continue
-        tensors[name] = buf.detach().cpu().contiguous()
+    for fqn, mod in model.named_modules():
+        for bname, buf in mod._buffers.items():
+            full_name = f"{fqn}.{bname}" if fqn else bname
+            if full_name in handled_buffer_keys or buf is None:
+                continue
+            handled_buffer_keys.add(full_name)
+            keep_fp32 = _is_precision_sensitive_fp32_buffer(mod, bname)
+            tensors[full_name] = _export_fp_tensor(buf, keep_fp32=keep_fp32)
 
     # Break any shared tensor storage aliases (required by safetensors)
     seen_ptrs: set[int] = set()
@@ -1344,6 +1718,7 @@ def save_quantized_safetensors_checkpoint(
         "format": "acestep_int8_safetensors_v1",
         "scope": scope,
         "quant_backend": quant_backend,
+        "compute_dtype": str(compute_dtype).replace("torch.", "") if compute_dtype is not None else "auto",
         "source_model": source_dir.name,
         "weights_file": QUANT_WEIGHTS_FILENAME,
         "quantized_layer_count": len(quantized_layers),
@@ -1358,8 +1733,9 @@ def save_quantized_safetensors_checkpoint(
     gc.collect()
 
     logger.info(
-        "[ACE-Step 1.5] Saved INT8 quantized checkpoint (%d quantized layers) to '%s'.",
+        "[ACE-Step 1.5] Saved INT8 quantized checkpoint (%d quantized layers, compute_dtype=%s) to '%s'.",
         len(quantized_layers),
+        meta["compute_dtype"],
         output_dir,
     )
     return output_dir
@@ -1376,8 +1752,9 @@ def load_quantized_safetensors_model(
 
     Uses ``accelerate.init_empty_weights`` (or meta device) to instantiate the
     model architecture with zero BF16 memory allocation, replaces quantized
-    linear layers with ``Int8DynamicLinear``, and loads ``model_int8.safetensors``
-    directly into CPU RAM.
+    linear layers with ``Int8DynamicLinear``, loads ``model_int8.safetensors``
+    directly into CPU RAM, reconstructs any missing non-persistent meta buffers
+    accurately, and aligns all dtypes coherently (preserving FP32 FSQ/RoPE/scales).
     """
     from safetensors.torch import load_file
     from transformers import AutoConfig, AutoModel, AutoModelForCausalLM
@@ -1395,7 +1772,7 @@ def load_quantized_safetensors_model(
 
     model_cls = AutoModelForCausalLM if scope == "lm" else AutoModel
 
-    # Build skeleton on meta device so we never materialize a full BF16 copy in RAM
+    # Build skeleton on meta device so we never materialize a full BF16/FP32 copy in RAM
     try:
         from accelerate import init_empty_weights
         with init_empty_weights():
@@ -1419,14 +1796,8 @@ def load_quantized_safetensors_model(
     del state_dict
     gc.collect()
 
-    # Re-materialize any remaining non-persistent meta buffers (e.g., rotary inv_freq)
-    for name, buf in list(model.named_buffers()):
-        if buf is not None and buf.device.type == "meta":
-            parts = name.split(".")
-            parent = model
-            for part in parts[:-1]:
-                parent = getattr(parent, part)
-            setattr(parent, parts[-1], torch.zeros(buf.shape, dtype=buf.dtype, device="cpu"))
+    # Re-materialize any remaining non-persistent meta buffers (RoPE inv_freq, FSQ codebooks/levels)
+    _rematerialize_meta_buffers(model)
 
     # Restore tied weights if LM ties embed_tokens & lm_head
     if hasattr(model, "tie_weights"):
@@ -1435,10 +1806,10 @@ def load_quantized_safetensors_model(
         except Exception:
             pass
 
-    # Ensure floating-point non-quantized params match compute_dtype on CPU
-    for name, param in model.named_parameters():
-        if param.is_floating_point() and param.device.type == "cpu" and param.dtype != compute_dtype:
-            param.data = param.data.to(compute_dtype)
+    # Align all non-quantized params & ordinary buffers to compute_dtype while preserving
+    # FP32 precision-sensitive buffers (weight_scale, inv_freq, FSQ implicit_codebook/scales)
+    # and installing ResidualFSQ boundary dtype guards.
+    align_module_dtypes(model, compute_dtype)
 
     if missing:
         logger.debug("[ACE-Step 1.5] Quantized load missing keys (%d): %s", len(missing), missing[:5])
@@ -1447,9 +1818,10 @@ def load_quantized_safetensors_model(
 
     model.eval()
     logger.info(
-        "[ACE-Step 1.5] Directly loaded cached INT8 checkpoint '%s' (%d quantized layers).",
+        "[ACE-Step 1.5] Directly loaded cached INT8 checkpoint '%s' (%d quantized layers, compute_dtype=%s).",
         model_dir.name,
         len(quantized_layers),
+        compute_dtype,
     )
     return model
 
@@ -1477,6 +1849,7 @@ class AceStepLMHandle:
     handler: Any = field(default=None, repr=False)
     _defer_original_delete: bool = field(default=False, repr=False)
     _last_quantized_source_dir: Optional[Path] = field(default=None, repr=False)
+    _export_compute_dtype: Optional[torch.dtype] = field(default=None, repr=False)
 
     def ensure_loaded(self) -> Any:
         """Load or move the ``LLMHandler`` into memory ready for PyTorch (``pt``) inference."""
@@ -1529,6 +1902,7 @@ class AceStepLMHandle:
                 effective_precision = "int8_dynamic"
 
         compute_dtype = resolve_torch_dtype(effective_precision, exec_device)
+        export_dtype = self._export_compute_dtype or compute_dtype
 
         if exec_device.type == "cuda":
             est_gb = 5.0 if effective_precision == "int8_dynamic" else 9.0
@@ -1547,7 +1921,7 @@ class AceStepLMHandle:
             )
             self.quant_backend = "cached_int8_safetensors"
             target_dev = "cpu" if self.device_mode == "cpu" else str(exec_device)
-            move_module_to_device_safe(model, target_dev)
+            move_module_to_device_safe(model, target_dev, compute_dtype)
             llm_handler.llm = model
             llm_handler.llm_tokenizer = tokenizer
             llm_handler._lm_full_model_path = str(load_dir)
@@ -1572,11 +1946,14 @@ class AceStepLMHandle:
             if not ok:
                 raise RuntimeError(f"Failed to initialize ACE-Step 5Hz LM ({self.model_name}): {status}")
 
+            if llm_handler.llm is not None:
+                align_module_dtypes(llm_handler.llm, compute_dtype)
+
             if effective_precision == "int8_dynamic" and llm_handler.llm is not None:
                 self.quant_backend = apply_int8_dynamic_quantization(
                     llm_handler.llm,
                     scope="lm",
-                    compute_dtype=compute_dtype,
+                    compute_dtype=export_dtype,
                     prefer_torchao=True,
                 )
                 if self.save_quantized:
@@ -1591,6 +1968,7 @@ class AceStepLMHandle:
                         output_dir=out_dir,
                         scope="lm",
                         quant_backend=self.quant_backend,
+                        compute_dtype=export_dtype,
                         overwrite=self.overwrite_quantized,
                     )
                     self.resolved_model_dir = out_dir
@@ -1600,7 +1978,7 @@ class AceStepLMHandle:
                         safe_delete_original_checkpoint(source_dir, out_dir, scope="lm")
 
                 target_dev = "cpu" if self.device_mode == "cpu" else str(exec_device)
-                move_module_to_device_safe(llm_handler.llm, target_dev)
+                move_module_to_device_safe(llm_handler.llm, target_dev, compute_dtype)
                 llm_handler.device = target_dev
                 llm_handler.dtype = compute_dtype
 
@@ -1718,6 +2096,8 @@ class AceStepDiTHandle:
             self.handler.dtype = compute_dtype
             self.handler.offload_to_cpu = True
             self.handler.offload_dit_to_cpu = self.offload_dit_to_cpu
+            align_module_dtypes(self.handler.model, compute_dtype)
+            install_handler_safe_transfer(self.handler)
             return self.handler
 
         # Check whether the handle already points to a cached INT8 checkpoint before touching disk/HF
@@ -1761,6 +2141,7 @@ class AceStepDiTHandle:
         handler.offload_to_cpu = True
         handler.offload_dit_to_cpu = self.offload_dit_to_cpu
         handler.vae = None  # Explicitly excluded; loaded in AceStepVAELoader
+        install_handler_safe_transfer(handler)
 
         attn_candidates = self._select_attention_impl(handler, exec_device)
         chosen_attn = attn_candidates[0]
@@ -1804,6 +2185,10 @@ class AceStepDiTHandle:
                 raise RuntimeError(f"Failed to load DiT model from '{load_dir}': {last_err}") from last_err
 
             model.eval()
+            # Ensure FP32 shards (e.g. acestep-v15-xl-base/sft/turbo) and all auxiliary modules
+            # are coherently cast to compute_dtype while preserving FP32 FSQ/RoPE buffers.
+            align_module_dtypes(model, compute_dtype)
+
             if effective_precision == "int8_dynamic":
                 self.quant_backend = apply_int8_dynamic_quantization(
                     model,
@@ -1811,6 +2196,7 @@ class AceStepDiTHandle:
                     compute_dtype=compute_dtype,
                     prefer_torchao=True,
                 )
+                align_module_dtypes(model, compute_dtype)
                 if self.save_quantized:
                     out_dir = get_quantized_save_dir(
                         source_dir,
@@ -1823,6 +2209,7 @@ class AceStepDiTHandle:
                         output_dir=out_dir,
                         scope="dit",
                         quant_backend=self.quant_backend,
+                        compute_dtype=compute_dtype,
                         overwrite=self.overwrite_quantized,
                     )
                     self.resolved_model_dir = out_dir
@@ -1832,6 +2219,7 @@ class AceStepDiTHandle:
                         safe_delete_original_checkpoint(source_dir, out_dir, scope="dit")
 
         model.config._attn_implementation = chosen_attn
+        align_module_dtypes(model, compute_dtype)
         handler.model = model
         handler.config = model.config
 
@@ -1857,11 +2245,11 @@ class AceStepDiTHandle:
         # Load Qwen3-Embedding-0.6B on CPU; AceStepSampler moves it transiently during text embedding
         handler.text_tokenizer = AutoTokenizer.from_pretrained(str(text_encoder_dir))
         handler.text_encoder = AutoModel.from_pretrained(str(text_encoder_dir))
-        handler.text_encoder.to(device="cpu", dtype=torch.float32)
+        move_module_to_device_safe(handler.text_encoder, "cpu", torch.float32)
         handler.text_encoder.eval()
 
         # Keep DiT on CPU until AceStepSampler explicitly starts diffusion
-        move_module_to_device_safe(handler.model, "cpu")
+        move_module_to_device_safe(handler.model, "cpu", compute_dtype)
         handler.last_init_params = {
             "config_path": self.model_name,
             "device": str(exec_device),
@@ -1932,7 +2320,7 @@ class AceStepVAEHandle:
         self.resolved_model_dir = vae_dir
 
         vae = AutoencoderOobleck.from_pretrained(str(vae_dir))
-        vae = vae.to(device=exec_device, dtype=vae_dtype)
+        move_module_to_device_safe(vae, exec_device, vae_dtype)
         vae.eval()
         self.vae = vae
         return self.vae, exec_device, vae_dtype
