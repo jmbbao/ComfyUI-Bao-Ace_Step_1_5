@@ -128,7 +128,7 @@ shared_models:
 This node uses some pip packets in old versions,so I recommend to create a launcher named
 "AceStep_ON.sh" (ask any AI to convert this linux scripts to windows .bat file)
 
-AceStep_ON.sh  has these orders:
+###AceStep_ON.sh###  has these orders:
 
 ```bash
 #!/bin/bash
@@ -147,7 +147,7 @@ So before opening ComfyUI you launch that script and it will install the version
 Then you launch Comfy and it works perfect because the correct versions of these packets are present.
 Then when you finished playing with Ace Step, close ComfyUI and now you run another script "AceStep_OFF.sh" to upgrade these packets again to the last version:
 
-AceStep_OFF.sh  has these orders:
+###AceStep_OFF.sh###  has these orders:
 
 ```bash
 #!/bin/bash
