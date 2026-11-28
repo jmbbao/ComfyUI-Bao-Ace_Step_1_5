@@ -1,6 +1,3 @@
-# >> WORK IN PROGRESS << 
-## >> NOT FINISHED BUT ALREADY WORKING <<
-
 # ComfyUI-Bao-Ace_Step_1_5
 
 Nodes for running Ace Step 1.5 / 1.5 XL on a graphics card with 12 GB of VRAM or more.
