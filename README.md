@@ -158,6 +158,7 @@ pip install -U huggingface_hub tokenizers diffusers transformers
 deactivate
 ```
 
+These two scripts must be in the /ComfyUI folder where you have too the launcher for ComfyUI.
 You can do this with other nodes that need old versions of pip packets, just create a script to installa them and then another one to upgrade them when you finished using the node.
 
 
