@@ -157,8 +157,6 @@ deactivate
 You can do this to be able to run any node that needs some old version of a pip packet but you then want them upgraded to last version for using other nodes.
 
 
-With `auto_download=True` (default), official Hugging Face checkpoints (`ACE-Step/Ace-Step1.5` and sub-models) are fetched automatically into that folder on first use.
-
 ## Node Catalog (19 Nodes)
 
 | Category | Nodes |
