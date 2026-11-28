@@ -125,8 +125,8 @@ shared_models:
 
 ### 5. Fixing the downgrading of pip packets
 
-This node uses some pip packets in old versions,so I recommend to create a launcher that you can call
-AceStep_ON.sh  (ask any AI to convert these linux scripts to windows .bat files)
+This node uses some pip packets in old versions,so I recommend to create a launcher named
+"AceStep_ON.sh" (ask any AI to convert this linux scripts to windows .bat file)
 
 AceStep_ON.sh  has these orders:
 
@@ -143,8 +143,9 @@ pip install transformers==4.57.6
 deactivate
 ```
 
-So before opening ComfyUI you launch that script and it install these exact versions it needs. So you launch Comfy and it works.
-Then when you finished, close ComfyUI and you run this launcher to upgrade all these packets to the last version:
+So before opening ComfyUI you launch that script and it will install the versions it needs for some packets. 
+Then you launch Comfy and it works perfect because the correct versions of these packets are present.
+Then when you finished playing with Ace Step, close ComfyUI and now you run another script "AceStep_OFF.sh" to upgrade these packets again to the last version:
 
 AceStep_OFF.sh  has these orders:
 
@@ -157,7 +158,7 @@ pip install -U huggingface_hub tokenizers diffusers transformers
 deactivate
 ```
 
-You can do this to be able to run any node that needs some old version of a pip packet but you then want them upgraded to last version for using other nodes.
+You can do this with other nodes that need old versions of pip packets, just create a script to installa them and then another one to upgrade them when you finished using the node.
 
 
 ## Node Catalog (19 Nodes)
